@@ -289,9 +289,9 @@ deleted_items = db.get_all(
 ```python
 db = DynamoDb(
     table_name="users",           # Required
-    region="us-west-2",           # Optional, defaults to AWS_DEFAULT_REGION
-    active_prefix="1#",           # Optional, for single-table pattern
-    inactive_prefix="0#",         # Optional
+    region="us-west-2",           # Optional, defaults to us-west-2
+    pk_separator="::",            # Optional, default partition key separator
+    sk_separator="#",             # Optional, default sort key status separator
 )
 ```
 
@@ -314,6 +314,16 @@ db = DynamoDb(
 |----------|------|---------|-------|
 | `build_filter(expr)` | OData filter string | ConditionBase | Parse filter expression |
 | `build_projection(fields)` | list[str] | (expr, attr_names_dict) | Build projection + name map |
+
+**Key Helpers (DynamoDb methods):**
+
+| Method | Args | Returns | Notes |
+|--------|------|---------|-------|
+| `build_pk` | `*parts` | str | Joins key parts with `pk_separator` |
+| `build_active_sk` | `value` | str | Ensures active SK prefix (`1#` by default) |
+| `build_inactive_sk` | `value` | str | Ensures inactive SK prefix (`0#` by default) |
+| `is_active_sk` | `value` | bool | Checks active prefix |
+| `is_inactive_sk` | `value` | bool | Checks inactive prefix |
 
 ---
 

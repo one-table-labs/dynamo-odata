@@ -13,7 +13,7 @@ from dynamo_odata import DynamoDb
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
 
-def _make_db() -> DynamoDb:
+def _make_db(sk_separator: str = "#") -> DynamoDb:
     """Return a DynamoDb instance with DynamoDB initialisation fully mocked out."""
     with patch("dynamo_odata.db.boto3") as mock_boto3:
         mock_resource = MagicMock()
@@ -23,7 +23,7 @@ def _make_db() -> DynamoDb:
         mock_resource.Table.return_value = mock_table
         mock_boto3.resource.return_value = mock_resource
 
-        db = DynamoDb(table_name="table_dev")
+        db = DynamoDb(table_name="table_dev", sk_separator=sk_separator)
         db.table = mock_table
         db.db = mock_resource
         return db
@@ -61,6 +61,17 @@ class TestBatchGetSync:
         assert {"pk": "pk::t1", "sk": "1#abc"} in call_keys
         assert {"pk": "pk::t1", "sk": "1#xyz"} in call_keys
         assert {"pk": "pk::t1", "sk": "2#old"} in call_keys
+
+    def test_sk_prefix_handling_with_custom_separator(self):
+        db = _make_db(sk_separator="|")
+        db.db.batch_get_item.return_value = _batch_response([])
+
+        db.batch_get("pk::t1", ["abc", "1|xyz", "2|old"], item_only=True)
+
+        call_keys = db.db.batch_get_item.call_args[1]["RequestItems"]["table_dev"]["Keys"]
+        assert {"pk": "pk::t1", "sk": "1|abc"} in call_keys
+        assert {"pk": "pk::t1", "sk": "1|xyz"} in call_keys
+        assert {"pk": "pk::t1", "sk": "2|old"} in call_keys
 
     def test_single_chunk_under_100(self):
         """Fewer than 100 keys: exactly one batch_get_item call."""

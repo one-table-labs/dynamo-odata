@@ -52,6 +52,20 @@ class TestDeleteSync:
         assert result["deleted_count"] == 2
         assert result["failed_count"] == 0
 
+    def test_soft_delete_moves_to_inactive_with_custom_separator(self):
+        db = _make_db()
+        db.sk_separator = "|"
+        db.ACTIVE_PREFIX = "1|"
+        db.INACTIVE_PREFIX = "0|"
+        db.table.delete_item.return_value = {"Attributes": {"pk": "a"}}
+        db.get = MagicMock(return_value={"pk": "a", "sk": "1|x", "name": "John"})
+        db.put = MagicMock(return_value={})
+
+        db.soft_delete("a", "1|x", {"deleted_reason": "test"})
+
+        put_kwargs = db.put.call_args.kwargs
+        assert put_kwargs["sk"] == "0|x"
+
 
 class TestDeleteAsync:
     def _make_ctx(self, response):

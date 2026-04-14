@@ -18,6 +18,8 @@ def _get_aioboto3_session():
 
 
 class DynamoDb:
+    DEFAULT_PK_SEPARATOR = "::"
+    DEFAULT_SK_SEPARATOR = "#"
     ACTIVE_PREFIX = "1#"
     INACTIVE_PREFIX = "0#"
 
@@ -26,11 +28,17 @@ class DynamoDb:
         table_name: str,
         region: Optional[str] = None,
         resource: Any = None,
+        pk_separator: str = DEFAULT_PK_SEPARATOR,
+        sk_separator: str = DEFAULT_SK_SEPARATOR,
     ) -> None:
         self.region = region or "us-west-2"
         self.db = resource or boto3.resource("dynamodb", region_name=self.region)
         self.table = self.db.Table(table_name)
         self.consumed_capacity: float = 0.0
+        self.pk_separator = pk_separator
+        self.sk_separator = sk_separator
+        self.ACTIVE_PREFIX = f"1{self.sk_separator}"
+        self.INACTIVE_PREFIX = f"0{self.sk_separator}"
 
     @staticmethod
     def _now_iso() -> str:
@@ -50,9 +58,41 @@ class DynamoDb:
 
     def _normalize_sks(self, pk: str, sks: List[str]) -> List[Dict[str, str]]:
         return [
-            {"pk": pk, "sk": sk if sk[1:2] == "#" else f"{self.ACTIVE_PREFIX}{sk}"}
+            {
+                "pk": pk,
+                "sk": sk if self._has_status_prefix(sk) else self.build_active_sk(sk),
+            }
             for sk in sks
         ]
+
+    def _has_status_prefix(self, sk: str) -> bool:
+        return len(sk) >= 2 and sk[1:2] == self.sk_separator and sk[0].isdigit()
+
+    def build_pk(self, *parts: str) -> str:
+        normalized = [part.strip() for part in parts if part and part.strip()]
+        if not normalized:
+            raise ValueError("At least one non-empty PK part is required")
+        return self.pk_separator.join(normalized)
+
+    def build_active_sk(self, value: str) -> str:
+        if self.is_active_sk(value):
+            return value
+        if self.is_inactive_sk(value):
+            return f"{self.ACTIVE_PREFIX}{value[len(self.INACTIVE_PREFIX):]}"
+        return f"{self.ACTIVE_PREFIX}{value}"
+
+    def build_inactive_sk(self, value: str) -> str:
+        if self.is_inactive_sk(value):
+            return value
+        if self.is_active_sk(value):
+            return f"{self.INACTIVE_PREFIX}{value[len(self.ACTIVE_PREFIX):]}"
+        return f"{self.INACTIVE_PREFIX}{value}"
+
+    def is_active_sk(self, value: str) -> bool:
+        return value.startswith(self.ACTIVE_PREFIX)
+
+    def is_inactive_sk(self, value: str) -> bool:
+        return value.startswith(self.INACTIVE_PREFIX)
 
     @staticmethod
     def _convert_to_decimal(value: Any) -> Any:
@@ -545,11 +585,11 @@ class DynamoDb:
         if current_record is None:
             return {"warning": "Record does not exist"}
 
-        active = "#" in current_record["sk"] and current_record["sk"].startswith(self.ACTIVE_PREFIX)
+        active = self.is_active_sk(current_record["sk"])
         if active:
             new_record = current_record.copy()
             new_record["active"] = False
-            new_sk = current_record["sk"].replace(self.ACTIVE_PREFIX, self.INACTIVE_PREFIX, 1)
+            new_sk = self.build_inactive_sk(current_record["sk"])
             for key, value in delete_data.items():
                 if key not in ["pk", "sk"]:
                     new_record[key] = value
@@ -612,11 +652,11 @@ class DynamoDb:
         if current_record is None:
             return {"warning": "Record does not exist"}
 
-        active = "#" in current_record["sk"] and current_record["sk"].startswith(self.ACTIVE_PREFIX)
+        active = self.is_active_sk(current_record["sk"])
         if active:
             new_record = current_record.copy()
             new_record["active"] = False
-            new_sk = current_record["sk"].replace(self.ACTIVE_PREFIX, self.INACTIVE_PREFIX, 1)
+            new_sk = self.build_inactive_sk(current_record["sk"])
             for key, value in delete_data.items():
                 if key not in ["pk", "sk"]:
                     new_record[key] = value
