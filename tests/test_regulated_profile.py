@@ -9,7 +9,10 @@ from dynamo_odata import (
     validate_page_size,
     validate_regulated_query,
 )
-from dynamo_odata.guardrails import FilterPolicyViolationError, PartitionKeyValidationError
+from dynamo_odata.guardrails import (
+    FilterPolicyViolationError,
+    PartitionKeyValidationError,
+)
 
 
 class _CaptureAuditHook:
