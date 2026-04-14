@@ -131,7 +131,7 @@ attributes such as `PK` and `SK`, pass a schema preset when constructing the cli
 from dynamo_odata import DynamoDb, UPPERCASE_KEY_SCHEMA
 
 db = DynamoDb(
-    table_name="pathfindehr-main",
+    table_name="main-table",
     region="us-east-1",
     key_schema=UPPERCASE_KEY_SCHEMA,
 )
@@ -163,7 +163,7 @@ validation so callers cannot query unexpected partitions or use unrestricted fil
 from dynamo_odata import DynamoDb, FilterPolicy, PartitionKeyGuard, UPPERCASE_KEY_SCHEMA
 
 db = DynamoDb(
-    table_name="pathfindehr-main",
+    table_name="main-table",
     key_schema=UPPERCASE_KEY_SCHEMA,
     partition_key_guard=PartitionKeyGuard(("TENANT#",)),
     filter_policy=FilterPolicy(
@@ -180,6 +180,41 @@ items = db.get_all("TENANT#tenant1", filter="status eq 'active'", item_only=True
 
 # Rejected before query execution
 # db.get_all("DISEASE#123", filter="contains(notes, 'x')", item_only=True)
+```
+
+### Regulated Environment Profile Helpers
+
+For API layers that need repeatable controls, use the optional regulated profile helpers:
+
+These helpers provide policy primitives only. PHI/PII identification and enforcement
+rules remain the responsibility of the consuming application.
+
+```python
+from dynamo_odata import (
+    apply_response_allowlist,
+    apply_response_field_policy,
+    build_regulated_profile,
+    validate_regulated_query,
+)
+
+profile = build_regulated_profile(
+    partition_prefixes=("TENANT#",),
+    allowed_filter_fields=frozenset({"status", "name"}),
+    max_page_size=50,
+)
+
+normalized_limit = validate_regulated_query(
+    profile,
+    partition_key="TENANT#tenant1",
+    filter_text="status eq 'active'",
+    limit=25,
+)
+
+items = [
+    {"PK": "TENANT#tenant1", "SK": "1#USER#1", "name": "Ada", "status": "active"},
+]
+safe_items = apply_response_field_policy(items, profile.forbidden_response_fields)
+public_items = apply_response_allowlist(safe_items, frozenset({"name", "status"}))
 ```
 
 ### Building Filters and Projections

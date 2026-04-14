@@ -2,6 +2,11 @@ name: Feature request
 description: Propose an improvement
 labels: [enhancement]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Please keep this issue vendor-neutral. Avoid product/customer names and
+        internal project-specific data unless it is strictly required.
   - type: input
     id: summary
     attributes:
@@ -26,3 +31,12 @@ body:
     id: alternatives
     attributes:
       label: Alternatives considered
+  - type: checkboxes
+    id: neutrality
+    attributes:
+      label: Open-source neutrality
+      options:
+        - label: I removed product/customer/internal project names unless required
+          required: true
+        - label: I used generic examples and no project-specific datasets/identifiers
+          required: true

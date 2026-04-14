@@ -192,6 +192,20 @@ def build_filter(expr: str) -> ConditionBase:
 
 ## Submitting Changes
 
+### Open Source Neutrality (Required)
+
+This repository is an open-source project. Keep issue, PR, and commit content
+vendor-neutral and generally reusable.
+
+- Do not include product names, customer names, or internal project names
+    (for example, an internal codename) in titles or descriptions unless it is strictly
+    needed for technical context.
+- Do not include organization-specific datasets, identifiers, or business logic
+    in examples, tests, docs, commit messages, issue bodies, or PR descriptions.
+- Prefer generic terms such as `tenant`, `user`, `record`, and `example-table`.
+- If a real-world context motivated a change, describe it in generic language
+    focused on the technical behavior.
+
 1. **Commit messages**: Use clear, descriptive messages
    - Good: `fix: handle null values in build_filter`
    - Bad: `fixes stuff`
@@ -201,6 +215,7 @@ def build_filter(expr: str) -> ConditionBase:
 3. **Open a pull request**:
    - Reference any related issues: `Closes #123`
    - Describe what changed and why
+    - Keep wording product-neutral and remove org-specific details
    - Include any testing notes
 
 4. **Respond to feedback**: Authors will review and may request changes
