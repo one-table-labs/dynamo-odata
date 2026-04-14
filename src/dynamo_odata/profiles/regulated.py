@@ -153,7 +153,9 @@ def validate_page_size(
     if max_page_size < 1:
         raise ValueError("max_page_size must be >= 1")
 
-    normalized_default = max_page_size if default_page_size is None else default_page_size
+    normalized_default = (
+        max_page_size if default_page_size is None else default_page_size
+    )
     if normalized_default < 1:
         raise ValueError("default_page_size must be >= 1")
     if normalized_default > max_page_size:
