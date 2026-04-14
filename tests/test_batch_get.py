@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from dynamo_odata import DynamoDb
 
-
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -68,7 +67,9 @@ class TestBatchGetSync:
 
         db.batch_get("pk::t1", ["abc", "1|xyz", "2|old"], item_only=True)
 
-        call_keys = db.db.batch_get_item.call_args[1]["RequestItems"]["table_dev"]["Keys"]
+        call_keys = db.db.batch_get_item.call_args[1]["RequestItems"]["table_dev"][
+            "Keys"
+        ]
         assert {"pk": "pk::t1", "sk": "1|abc"} in call_keys
         assert {"pk": "pk::t1", "sk": "1|xyz"} in call_keys
         assert {"pk": "pk::t1", "sk": "2|old"} in call_keys

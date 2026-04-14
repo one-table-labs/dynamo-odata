@@ -42,7 +42,12 @@ class TestPutSync:
         db = _make_db()
         db.table.update_item.return_value = {"Attributes": {}}
 
-        db.put("a", "1#x", {"recent_login": "2026-04-13T00:00:00Z"}, append_list=["recent_login"])
+        db.put(
+            "a",
+            "1#x",
+            {"recent_login": "2026-04-13T00:00:00Z"},
+            append_list=["recent_login"],
+        )
 
         kwargs = db.table.update_item.call_args.kwargs
         assert "list_append" in kwargs["UpdateExpression"]
@@ -65,6 +70,8 @@ class TestPutAsync:
 
         with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
             mock_session.return_value.resource.return_value = ctx
-            result = asyncio.run(db.put_async("a", "1#x", {"name": "John"}, item_only=True))
+            result = asyncio.run(
+                db.put_async("a", "1#x", {"name": "John"}, item_only=True)
+            )
 
         assert result == {"pk": "a"}

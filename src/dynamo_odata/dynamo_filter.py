@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from boto3.dynamodb.conditions import Attr, ConditionBase
 
-from .odata_query import ast
-from .odata_query import exceptions
-from .odata_query import visitor
+from .odata_query import ast, exceptions, visitor
 from .odata_query.grammar import parse_odata
 
 
@@ -130,7 +128,9 @@ class AstToDynamoConditionVisitor(visitor.NodeVisitor):
             return self.visit(node)
         if isinstance(node, ast.Call) and node.func.name.lower() == "tolower":
             return self._field_name(node.args[0]).lower()
-        raise exceptions.ArgumentTypeException("field", "Identifier", type(node).__name__)
+        raise exceptions.ArgumentTypeException(
+            "field", "Identifier", type(node).__name__
+        )
 
 
 def build_filter(filter_str: str) -> ConditionBase:

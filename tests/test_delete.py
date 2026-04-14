@@ -44,7 +44,9 @@ class TestDeleteSync:
 
     def test_batch_delete_uses_get_all(self):
         db = _make_db()
-        db.get_all = MagicMock(return_value=[{"pk": "a", "sk": "1#x"}, {"pk": "a", "sk": "1#y"}])
+        db.get_all = MagicMock(
+            return_value=[{"pk": "a", "sk": "1#x"}, {"pk": "a", "sk": "1#y"}]
+        )
         db.delete = MagicMock(return_value={})
 
         result = DynamoDb.delete(db, "a", sk_begins_with="1#", is_purge=True)

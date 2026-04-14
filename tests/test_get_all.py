@@ -82,10 +82,16 @@ class TestGetAllAsync:
 
     def test_get_all_async_paginates(self):
         db = _make_db()
-        ctx = self._make_ctx([
-            {"Items": [{"pk": "a"}], "Count": 1, "LastEvaluatedKey": {"pk": "a", "sk": "1#1"}},
-            {"Items": [{"pk": "b"}], "Count": 1},
-        ])
+        ctx = self._make_ctx(
+            [
+                {
+                    "Items": [{"pk": "a"}],
+                    "Count": 1,
+                    "LastEvaluatedKey": {"pk": "a", "sk": "1#1"},
+                },
+                {"Items": [{"pk": "b"}], "Count": 1},
+            ]
+        )
 
         with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
             mock_session.return_value.resource.return_value = ctx

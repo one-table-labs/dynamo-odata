@@ -1,5 +1,4 @@
 boto3>=1.26
-sly>=0.5
 lark>=1.1
 
 [async]
@@ -9,6 +8,8 @@ aioboto3>=13.0
 pytest>=8.0
 pytest-asyncio>=0.23
 ruff>=0.6
+pre-commit>=3.7
+mypy>=1.11
 
 [fastapi]
 fastapi>=0.100

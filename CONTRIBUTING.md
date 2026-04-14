@@ -23,6 +23,9 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 # Install in development mode with all dependencies
 pip install -e ".[dev]"
 
+# Install git hooks
+pre-commit install
+
 # Verify setup
 pytest tests/ -q
 ```
@@ -57,10 +60,16 @@ We follow PEP 8 and use `ruff` for linting:
 
 ```bash
 # Check code style
-ruff check src/ tests/
+ruff check .
 
-# Format code (if using ruff format)
-ruff format src/ tests/
+# Format code
+ruff format .
+
+# Static type checking
+mypy src/dynamo_odata
+
+# Run all local hooks
+pre-commit run --all-files
 ```
 
 ## Making Changes

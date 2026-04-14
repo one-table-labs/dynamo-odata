@@ -1,7 +1,7 @@
 import logging
 from typing import Optional
 
-from .. import ast, exceptions, typing, visitor
+from .. import ast, exceptions, visitor
 
 log = logging.getLogger(__name__)
 

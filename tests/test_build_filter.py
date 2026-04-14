@@ -1,5 +1,4 @@
 import pytest
-
 from boto3.dynamodb.conditions import ConditionBase
 
 from dynamo_odata import build_filter
