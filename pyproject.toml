@@ -9,10 +9,9 @@ description = "OData filter and projection helpers for AWS DynamoDB"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Robert Smith", email = "robert@rsmith.us" }]
-license = { text = "MIT" }
+license = "MIT"
 keywords = ["dynamodb", "odata", "boto3", "aws", "projection", "filter"]
 classifiers = [
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
