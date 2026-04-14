@@ -1,0 +1,33 @@
+Metadata-Version: 2.4
+Name: dynamo-odata
+Version: 0.1.0
+Summary: DynamoDB-focused OData toolkit
+Author: smitrob
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: boto3>=1.26
+Requires-Dist: sly>=0.5
+Requires-Dist: lark>=1.1
+Provides-Extra: async
+Requires-Dist: aioboto3>=13.0; extra == "async"
+Provides-Extra: fastapi
+Requires-Dist: fastapi>=0.100; extra == "fastapi"
+Requires-Dist: pydantic>=2.0; extra == "fastapi"
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23; extra == "dev"
+Requires-Dist: ruff>=0.6; extra == "dev"
+
+# dynamo-odata
+
+DynamoDB-focused OData toolkit with an optional FastAPI integration layer.
+
+## Status
+
+Planning and initial scaffolding.
+
+## Repository layout
+
+- `plan/` implementation plans
+- `src/dynamo_odata/` library code
+- `tests/` automated tests

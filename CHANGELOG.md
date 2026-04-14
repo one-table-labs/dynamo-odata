@@ -1,0 +1,82 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Planned (v1.1)
+- FastAPI integration layer (`ODataService`, `ODataRouter`, Pydantic models, OpenAPI docs)
+- `$expand` support with dotted `$select` (controlled N+1 joins with batching/caching)
+- Conflict detection / duplicate checks
+
+### Planned (v1.2+)
+- Performance benchmarks and optimization
+- Extended documentation and examples
+- Additional helper methods based on user feedback
+
+---
+
+## [0.1.0] - 2026-04-13
+
+### Added
+
+**Core Library:**
+- `DynamoDb` client with full sync/async CRUD operations
+  - `get()` / `get_async()` — single item lookup
+  - `get_all()` / `get_all_async()` — query with OData filter
+  - `batch_get()` / `batch_get_async()` — batch operations with auto-chunking
+  - `put()` / `put_async()` — create/update
+  - `delete()` / `delete_async()` — hard delete
+  - `soft_delete()` / `soft_delete_async()` — soft delete with prefix move
+  - `hard_delete()` / `hard_delete_async()` — permanent delete
+  - `scan_all_paginated()` / `scan_all_paginated_async()` — paginated scanning
+
+**OData Filtering:**
+- `build_filter(expr)` — parse OData filter expressions into boto3 `ConditionBase`
+- Supported operators: `eq`, `ne`, `lt`, `le`, `gt`, `ge`, `in`, `between`, `contains`, `startswith`, `exists`, `not_exists`
+- Supported boolean logic: `and`, `or`, `not`
+- Type-safe filtering (no `eval()`)
+
+**Projections:**
+- `build_projection(fields)` — build DynamoDB `ProjectionExpression` with reserved keyword handling
+
+**Single-Table Pattern:**
+- Active/inactive record management via `1#` / `0#` prefixes
+- Soft delete semantics (move to inactive, queryable)
+- Hard delete semantics (permanent removal)
+- Query control for including/excluding inactive records
+
+**Technical:**
+- Parser migrated from `sly` (unmaintained) to `lark` (actively maintained)
+- Full async support with `aioboto3`
+- Type hints (`py.typed` marker)
+- 133 comprehensive tests
+- CI/CD with GitHub Actions (Python 3.10, 3.11, 3.12)
+
+### Dependencies
+- `boto3>=1.26` — AWS SDK
+- `lark>=1.1` — OData parser
+- Optional: `aioboto3>=13.0` (async support)
+- Optional: `fastapi>=0.100`, `pydantic>=2.0` (FastAPI integration, forthcoming)
+
+### Known Limitations
+- No `$expand` support (planned for v1.1)
+- No `$orderby` support (partial implementation)
+- FastAPI integration not yet available (planned for v1.1)
+- No custom OData functions (by design; DynamoDB has limited function set)
+
+### Migration Notes
+- Extracted from `consumer_sdk` internal OData implementation
+- Replaces the string-based `eval()`-based filter approach with type-safe direct API
+- Standalone package — `consumer_sdk` will depend on this in future release
+
+---
+
+## Upcoming: Phase 4+ Roadmap
+
+- **Upstream Contribution**: Submit DynamoDB visitor to `odata-query` PyPI project
+- **consumer_sdk Integration**: Wire `consumer_sdk` to depend on published `dynamo-odata`
+- **PyPI Publication**: Public release to Python Package Index
+- **HIPAA Readiness** (optional): Compliance profile for healthcare use cases

@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dynamo-odata"
+version = "0.1.0"
+description = "OData filter and projection helpers for AWS DynamoDB"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "smitrob" }]
+license = { text = "MIT" }
+keywords = ["dynamodb", "odata", "boto3", "aws", "projection", "filter"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Framework :: AsyncIO",
+  "Topic :: Database",
+]
+dependencies = [
+  "boto3>=1.26",
+  "lark>=1.1",
+]
+
+[project.optional-dependencies]
+async = ["aioboto3>=13.0"]
+fastapi = ["fastapi>=0.100", "pydantic>=2.0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.6"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"dynamo_odata" = ["py.typed"]
