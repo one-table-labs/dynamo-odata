@@ -1,0 +1,19 @@
+dynamo-odata
+Copyright (c) 2026 Robert Smith
+
+This product includes software developed by Gorillini NV:
+  odata-query (https://github.com/gorilla-co/odata-query)
+  Copyright (c) Gorillini NV
+  Licensed under the MIT License
+
+The following vendored modules originate from odata-query:
+  src/dynamo_odata/odata_query/ast.py
+  src/dynamo_odata/odata_query/exceptions.py
+  src/dynamo_odata/odata_query/rewrite.py
+  src/dynamo_odata/odata_query/typing.py
+  src/dynamo_odata/odata_query/utils.py
+  src/dynamo_odata/odata_query/visitor.py
+
+These files have been modified from their original form. The DynamoDB backend
+(dynamo_filter.py, odata_query/dynamo/, odata_query/dynamodb/, lark_parser.py)
+is original work.

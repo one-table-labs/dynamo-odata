@@ -6,6 +6,19 @@ from typing import Dict, Iterable, Optional, Tuple
 def build_projection(
     fields: Optional[Iterable[str]],
 ) -> Tuple[Optional[str], Dict[str, str]]:
+    """Build a DynamoDB ProjectionExpression from a list of field names.
+
+    All fields are aliased via ExpressionAttributeNames to avoid conflicts
+    with DynamoDB reserved keywords (e.g. 'name', 'status', 'id').
+
+    Args:
+        fields: Iterable of field names, supporting dotted notation for nested
+                attributes (e.g. "address.city").
+
+    Returns:
+        A tuple of (ProjectionExpression string, ExpressionAttributeNames dict).
+        Returns (None, {}) if fields is empty or None.
+    """
     if not fields:
         return None, {}
 

@@ -134,8 +134,9 @@ condition = build_filter("status eq 'active' and age gt 18")
 # Returns: Attr('status').eq('active') & Attr('age').gt(18)
 
 # Build projection expression (field list)
+# All fields are aliased because many common names are DynamoDB reserved keywords
 projection_expr, attr_names = build_projection(["id", "name", "status"])
-# Returns: ("id, #n_0, #n_1", {"#n_0": "name", "#n_1": "status"})
+# Returns: ("#id,#name,#status", {"#id": "id", "#name": "name", "#status": "status"})
 ```
 
 ---
@@ -408,7 +409,11 @@ pytest tests/test_filter.py -v
 
 ## License
 
-MIT. See LICENSE file for details.
+MIT. See [LICENSE](LICENSE) for details.
+
+### Attribution
+
+This package includes a vendored and modified version of the OData AST, visitor, and grammar from [odata-query](https://github.com/gorilla-co/odata-query) by Gorillini NV, used under the MIT License. The DynamoDB backend is original work.
 
 ---
 

@@ -134,5 +134,17 @@ class AstToDynamoConditionVisitor(visitor.NodeVisitor):
 
 
 def build_filter(filter_str: str) -> ConditionBase:
+    """Parse an OData $filter expression and return a boto3 ConditionBase object.
+
+    Args:
+        filter_str: OData filter string, e.g. "status eq 'active' and age gt 18"
+
+    Returns:
+        A boto3 ConditionBase that can be passed directly as FilterExpression.
+
+    Raises:
+        InvalidQueryException: If the filter string cannot be parsed.
+        UnsupportedFunctionException: If an unsupported OData function is used.
+    """
     ast_tree = parse_odata(filter_str)
     return AstToDynamoConditionVisitor().visit(ast_tree)

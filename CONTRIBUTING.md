@@ -37,10 +37,10 @@ pytest tests/
 pytest tests/ -v
 
 # Run a specific test file
-pytest tests/test_filter.py
+pytest tests/test_build_filter.py
 
 # Run a specific test
-pytest tests/test_filter.py::test_build_filter_eq
+pytest tests/test_build_filter.py::test_build_filter_eq
 
 # Run with coverage report
 pytest tests/ --cov=src/dynamo_odata --cov-report=term-missing
