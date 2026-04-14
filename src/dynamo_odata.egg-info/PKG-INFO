@@ -3,13 +3,12 @@ Name: dynamo-odata
 Version: 0.1.0
 Summary: OData filter and projection helpers for AWS DynamoDB
 Author-email: Robert Smith <robert@rsmith.us>
-License: MIT
+License-Expression: MIT
 Project-URL: Homepage, https://github.com/smitrob/dynamo-odata
 Project-URL: Repository, https://github.com/smitrob/dynamo-odata
 Project-URL: Issues, https://github.com/smitrob/dynamo-odata/issues
 Project-URL: Changelog, https://github.com/smitrob/dynamo-odata/blob/main/CHANGELOG.md
 Keywords: dynamodb,odata,boto3,aws,projection,filter
-Classifier: License :: OSI Approved :: MIT License
 Classifier: Programming Language :: Python :: 3
 Classifier: Programming Language :: Python :: 3.10
 Classifier: Programming Language :: Python :: 3.11
@@ -31,8 +30,6 @@ Provides-Extra: dev
 Requires-Dist: pytest>=8.0; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.23; extra == "dev"
 Requires-Dist: ruff>=0.6; extra == "dev"
-Requires-Dist: pre-commit>=3.7; extra == "dev"
-Requires-Dist: mypy>=1.11; extra == "dev"
 Dynamic: license-file
 
 # dynamo-odata
@@ -326,9 +323,9 @@ deleted_items = db.get_all(
 ```python
 db = DynamoDb(
     table_name="users",           # Required
-    region="us-west-2",           # Optional, defaults to us-west-2
-    pk_separator="::",            # Optional, default partition key separator
-    sk_separator="#",             # Optional, default sort key status separator
+    region="us-west-2",           # Optional, defaults to AWS_DEFAULT_REGION
+    active_prefix="1#",           # Optional, for single-table pattern
+    inactive_prefix="0#",         # Optional
 )
 ```
 
@@ -351,16 +348,6 @@ db = DynamoDb(
 |----------|------|---------|-------|
 | `build_filter(expr)` | OData filter string | ConditionBase | Parse filter expression |
 | `build_projection(fields)` | list[str] | (expr, attr_names_dict) | Build projection + name map |
-
-**Key Helpers (DynamoDb methods):**
-
-| Method | Args | Returns | Notes |
-|--------|------|---------|-------|
-| `build_pk` | `*parts` | str | Joins key parts with `pk_separator` |
-| `build_active_sk` | `value` | str | Ensures active SK prefix (`1#` by default) |
-| `build_inactive_sk` | `value` | str | Ensures inactive SK prefix (`0#` by default) |
-| `is_active_sk` | `value` | bool | Checks active prefix |
-| `is_inactive_sk` | `value` | bool | Checks inactive prefix |
 
 ---
 
