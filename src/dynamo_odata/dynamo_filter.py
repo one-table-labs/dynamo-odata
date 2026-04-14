@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from boto3.dynamodb.conditions import Attr, ConditionBase
 
+from .guardrails import FilterPolicy
 from .odata_query import ast, exceptions, visitor
 from .odata_query.grammar import parse_odata
 
@@ -133,7 +134,16 @@ class AstToDynamoConditionVisitor(visitor.NodeVisitor):
         )
 
 
-def build_filter(filter_str: str) -> ConditionBase:
+def validate_filter(filter_str: str, policy: FilterPolicy) -> ast._Node:
+    ast_tree = parse_odata(filter_str)
+    policy.validate(ast_tree)
+    return ast_tree
+
+
+def build_filter(
+    filter_str: str,
+    policy: FilterPolicy | None = None,
+) -> ConditionBase:
     """Parse an OData $filter expression and return a boto3 ConditionBase object.
 
     Args:
@@ -147,4 +157,6 @@ def build_filter(filter_str: str) -> ConditionBase:
         UnsupportedFunctionException: If an unsupported OData function is used.
     """
     ast_tree = parse_odata(filter_str)
+    if policy is not None:
+        policy.validate(ast_tree)
     return AstToDynamoConditionVisitor().visit(ast_tree)

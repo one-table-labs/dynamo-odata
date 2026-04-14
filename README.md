@@ -122,6 +122,66 @@ async for page in db.scan_all_paginated_async(pk="user::tenant1", page_size=50):
     print(f"Got {len(page)} items")
 ```
 
+### Key Schema Configuration
+
+The default key attribute names are lowercase `pk` and `sk`. For projects that use uppercase
+attributes such as `PK` and `SK`, pass a schema preset when constructing the client:
+
+```python
+from dynamo_odata import DynamoDb, UPPERCASE_KEY_SCHEMA
+
+db = DynamoDb(
+    table_name="pathfindehr-main",
+    region="us-east-1",
+    key_schema=UPPERCASE_KEY_SCHEMA,
+)
+
+item = db.get(pk="TENANT#tenant1", sk="1#USER#123", item_only=True)
+```
+
+You can also define a custom schema if your table uses different key names or separators:
+
+```python
+from dynamo_odata import DynamoDb, KeySchema
+
+custom_schema = KeySchema(
+    pk_name="PK",
+    sk_name="SK",
+    pk_separator="::",
+    sk_separator="#",
+)
+
+db = DynamoDb(table_name="custom-table", key_schema=custom_schema)
+```
+
+### Guardrails For API Usage
+
+For API-facing workloads, you can opt into partition-key validation and filter-policy
+validation so callers cannot query unexpected partitions or use unrestricted filters.
+
+```python
+from dynamo_odata import DynamoDb, FilterPolicy, PartitionKeyGuard, UPPERCASE_KEY_SCHEMA
+
+db = DynamoDb(
+    table_name="pathfindehr-main",
+    key_schema=UPPERCASE_KEY_SCHEMA,
+    partition_key_guard=PartitionKeyGuard(("TENANT#",)),
+    filter_policy=FilterPolicy(
+        allowed_fields=frozenset({"status", "specialty", "lsis3"}),
+        allowed_comparators=frozenset({"eq", "ne", "gt", "ge", "lt", "le"}),
+        allowed_functions=frozenset({"contains", "startswith", "tolower"}),
+        max_predicates=4,
+        max_depth=6,
+    ),
+)
+
+# Allowed
+items = db.get_all("TENANT#tenant1", filter="status eq 'active'", item_only=True)
+
+# Rejected before query execution
+# db.get_all("DISEASE#123", filter="contains(notes, 'x')", item_only=True)
+```
+
 ### Building Filters and Projections
 
 Use `build_filter()` and `build_projection()` as standalone utilities (no database connection needed):
