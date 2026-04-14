@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Configurable key schema support:
+  - `KeySchema` for custom key attribute names and separators
+  - `DEFAULT_KEY_SCHEMA` and `UPPERCASE_KEY_SCHEMA` presets
+  - `DynamoDb` support for `key_schema`, with backward-compatible defaults
+- Optional API guardrails:
+  - `PartitionKeyGuard` and `PartitionKeyValidationError`
+  - `FilterPolicy` and `FilterPolicyViolationError`
+  - `validate_filter()` helper for policy-only validation
+- Optional regulated profile helpers:
+  - `RegulatedProfile` and `build_regulated_profile()`
+  - `validate_regulated_query()` for combined guard validation
+  - `validate_page_size()` for bounded pagination
+  - `apply_response_field_policy()` for response field redaction
+  - `AuditHook` protocol and `NoOpAuditHook` default
+
+### Changed
+
+- `DynamoDb` key operations now resolve key attribute names via schema configuration
+  instead of hardcoded `pk`/`sk` internals.
+- README now includes key schema, guardrail, and regulated profile usage examples.
+
 ### Planned (v1.1)
 - FastAPI integration layer (`ODataService`, `ODataRouter`, Pydantic models, OpenAPI docs)
 - `$expand` support with dotted `$select` (controlled N+1 joins with batching/caching)
@@ -79,4 +102,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Upstream Contribution**: Submit DynamoDB visitor to `odata-query` PyPI project
 - **consumer_sdk Integration**: Wire `consumer_sdk` to depend on published `dynamo-odata`
 - **PyPI Publication**: Public release to Python Package Index
-- **HIPAA Readiness** (optional): Compliance profile for healthcare use cases
+- **Regulated profile support** (optional): Reusable safety helpers for regulated workloads
