@@ -44,13 +44,29 @@ class TestDeleteSync:
 
     def test_batch_delete_uses_get_all(self):
         db = _make_db()
-        db.get_all = MagicMock(return_value=[{"pk": "a", "sk": "1#x"}, {"pk": "a", "sk": "1#y"}])
+        db.get_all = MagicMock(
+            return_value=[{"pk": "a", "sk": "1#x"}, {"pk": "a", "sk": "1#y"}]
+        )
         db.delete = MagicMock(return_value={})
 
         result = DynamoDb.delete(db, "a", sk_begins_with="1#", is_purge=True)
 
         assert result["deleted_count"] == 2
         assert result["failed_count"] == 0
+
+    def test_soft_delete_moves_to_inactive_with_custom_separator(self):
+        db = _make_db()
+        db.sk_separator = "|"
+        db.ACTIVE_PREFIX = "1|"
+        db.INACTIVE_PREFIX = "0|"
+        db.table.delete_item.return_value = {"Attributes": {"pk": "a"}}
+        db.get = MagicMock(return_value={"pk": "a", "sk": "1|x", "name": "John"})
+        db.put = MagicMock(return_value={})
+
+        db.soft_delete("a", "1|x", {"deleted_reason": "test"})
+
+        put_kwargs = db.put.call_args.kwargs
+        assert put_kwargs["sk"] == "0|x"
 
 
 class TestDeleteAsync:

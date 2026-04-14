@@ -18,17 +18,16 @@ OData syntax notes:
 """
 
 import pytest
-
 from boto3.dynamodb.conditions import Attr, ConditionBase
+
+from dynamo_odata.odata_query import exceptions
+from dynamo_odata.odata_query.dynamo import AstToDynamoVisitor
+from dynamo_odata.odata_query.grammar import parse_odata
 
 # Eval context for OData expressions — must include Attr since all generated
 # expressions reference it by name.  Keep this dict assignment so the linter
 # can see Attr is actually used (eval() strings are invisible to ruff/pyflakes).
 _EVAL_CTX = {"Attr": Attr}
-
-from dynamo_odata.odata_query import exceptions
-from dynamo_odata.odata_query.dynamo import AstToDynamoVisitor
-from dynamo_odata.odata_query.grammar import parse_odata
 
 
 # ─── helpers ─────────────────────────────────────────────────────────────────

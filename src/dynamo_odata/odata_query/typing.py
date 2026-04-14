@@ -1,8 +1,9 @@
+import logging
 import operator
 from typing import Optional, Tuple, Type, Union
-import logging
 
-from . import ast, exceptions as ex
+from . import ast
+from . import exceptions as ex
 
 log = logging.getLogger(__name__)
 

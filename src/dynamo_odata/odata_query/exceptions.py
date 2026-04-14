@@ -1,7 +1,5 @@
 from typing import Any, Optional
 
-from sly.lex import Token
-
 
 class ODataException(Exception):
     """
@@ -24,7 +22,7 @@ class TokenizingException(ODataSyntaxError):
     Thrown when the lexer cannot tokenize the query.
     """
 
-    def __init__(self, token: Token):
+    def __init__(self, token: Any):
         self.token = token
         super().__init__(f"Failed to tokenize at: {token}")
 
@@ -34,7 +32,7 @@ class ParsingException(ODataSyntaxError):
     Thrown when the parser cannot parse the query.
     """
 
-    def __init__(self, token: Optional[Token], eof: bool = False):
+    def __init__(self, token: Optional[Any], eof: bool = False):
         self.token = token
         self.eof = eof
         super().__init__(f"Failed to parse at: {token}")

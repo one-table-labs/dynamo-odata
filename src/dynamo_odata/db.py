@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Union
 
 import boto3
@@ -18,6 +18,8 @@ def _get_aioboto3_session():
 
 
 class DynamoDb:
+    DEFAULT_PK_SEPARATOR = "::"
+    DEFAULT_SK_SEPARATOR = "#"
     ACTIVE_PREFIX = "1#"
     INACTIVE_PREFIX = "0#"
 
@@ -26,15 +28,26 @@ class DynamoDb:
         table_name: str,
         region: Optional[str] = None,
         resource: Any = None,
+        pk_separator: str = DEFAULT_PK_SEPARATOR,
+        sk_separator: str = DEFAULT_SK_SEPARATOR,
     ) -> None:
         self.region = region or "us-west-2"
         self.db = resource or boto3.resource("dynamodb", region_name=self.region)
         self.table = self.db.Table(table_name)
         self.consumed_capacity: float = 0.0
+        self.pk_separator = pk_separator
+        self.sk_separator = sk_separator
+        self.ACTIVE_PREFIX = f"1{self.sk_separator}"
+        self.INACTIVE_PREFIX = f"0{self.sk_separator}"
 
     @staticmethod
     def _now_iso() -> str:
-        return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        return (
+            datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
 
     def add_consumed_capacity(self, consumed_capacity: Any) -> None:
         if not consumed_capacity:
@@ -50,14 +63,48 @@ class DynamoDb:
 
     def _normalize_sks(self, pk: str, sks: List[str]) -> List[Dict[str, str]]:
         return [
-            {"pk": pk, "sk": sk if sk[1:2] == "#" else f"{self.ACTIVE_PREFIX}{sk}"}
+            {
+                "pk": pk,
+                "sk": sk if self._has_status_prefix(sk) else self.build_active_sk(sk),
+            }
             for sk in sks
         ]
+
+    def _has_status_prefix(self, sk: str) -> bool:
+        return len(sk) >= 2 and sk[1:2] == self.sk_separator and sk[0].isdigit()
+
+    def build_pk(self, *parts: str) -> str:
+        normalized = [part.strip() for part in parts if part and part.strip()]
+        if not normalized:
+            raise ValueError("At least one non-empty PK part is required")
+        return self.pk_separator.join(normalized)
+
+    def build_active_sk(self, value: str) -> str:
+        if self.is_active_sk(value):
+            return value
+        if self.is_inactive_sk(value):
+            return f"{self.ACTIVE_PREFIX}{value[len(self.INACTIVE_PREFIX) :]}"
+        return f"{self.ACTIVE_PREFIX}{value}"
+
+    def build_inactive_sk(self, value: str) -> str:
+        if self.is_inactive_sk(value):
+            return value
+        if self.is_active_sk(value):
+            return f"{self.INACTIVE_PREFIX}{value[len(self.ACTIVE_PREFIX) :]}"
+        return f"{self.INACTIVE_PREFIX}{value}"
+
+    def is_active_sk(self, value: str) -> bool:
+        return value.startswith(self.ACTIVE_PREFIX)
+
+    def is_inactive_sk(self, value: str) -> bool:
+        return value.startswith(self.INACTIVE_PREFIX)
 
     @staticmethod
     def _convert_to_decimal(value: Any) -> Any:
         if isinstance(value, dict):
-            return {key: DynamoDb._convert_to_decimal(item) for key, item in value.items()}
+            return {
+                key: DynamoDb._convert_to_decimal(item) for key, item in value.items()
+            }
         if isinstance(value, list):
             return [DynamoDb._convert_to_decimal(item) for item in value]
         if isinstance(value, (int, float)):
@@ -79,7 +126,9 @@ class DynamoDb:
     ) -> Union[Dict[str, Any], None]:
         effective_fields = fields or select
         if isinstance(effective_fields, str):
-            effective_fields = [field.strip() for field in effective_fields.split(",") if field.strip()]
+            effective_fields = [
+                field.strip() for field in effective_fields.split(",") if field.strip()
+            ]
 
         params: Dict[str, Any] = {
             "Key": {"pk": pk, "sk": sk},
@@ -118,7 +167,10 @@ class DynamoDb:
         del next_link
         requested_limit = limit
         chunk_size = min(limit, 500) if limit != 1000 else 500
-        params: Dict[str, Any] = {"ReturnConsumedCapacity": "TOTAL", "Limit": chunk_size}
+        params: Dict[str, Any] = {
+            "ReturnConsumedCapacity": "TOTAL",
+            "Limit": chunk_size,
+        }
 
         if consistent_read and lsi is False:
             params["ConsistentRead"] = True
@@ -126,13 +178,19 @@ class DynamoDb:
             params["IndexName"] = lsi
 
         if sk_begins_with is not None:
-            params["KeyConditionExpression"] = Key("pk").eq(pk) & Key("sk").begins_with(sk_begins_with)
+            params["KeyConditionExpression"] = Key("pk").eq(pk) & Key("sk").begins_with(
+                sk_begins_with
+            )
         elif active is None:
             params["KeyConditionExpression"] = Key("pk").eq(pk)
         elif active is True and pk != "tenants":
-            params["KeyConditionExpression"] = Key("pk").eq(pk) & Key("sk").begins_with(self.ACTIVE_PREFIX)
+            params["KeyConditionExpression"] = Key("pk").eq(pk) & Key("sk").begins_with(
+                self.ACTIVE_PREFIX
+            )
         elif active is False:
-            params["KeyConditionExpression"] = Key("pk").eq(pk) & Key("sk").begins_with(self.INACTIVE_PREFIX)
+            params["KeyConditionExpression"] = Key("pk").eq(pk) & Key("sk").begins_with(
+                self.INACTIVE_PREFIX
+            )
         else:
             params["KeyConditionExpression"] = Key("pk").eq(pk)
 
@@ -140,7 +198,9 @@ class DynamoDb:
             params["FilterExpression"] = build_filter(filter)
 
         if select is not None:
-            select_fields = [field.strip() for field in select.split(",") if field.strip()]
+            select_fields = [
+                field.strip() for field in select.split(",") if field.strip()
+            ]
             projection_expr, expr_attr_names = build_projection(select_fields)
             if projection_expr:
                 params["ProjectionExpression"] = projection_expr
@@ -246,8 +306,13 @@ class DynamoDb:
 
         async with session.resource("dynamodb", region_name=self.region) as resource:
             while pending_keys:
-                chunk, pending_keys = pending_keys[:batch_chunk], pending_keys[batch_chunk:]
-                request_items: Dict[str, Any] = {table_name: {**table_spec, "Keys": chunk}}
+                chunk, pending_keys = (
+                    pending_keys[:batch_chunk],
+                    pending_keys[batch_chunk:],
+                )
+                request_items: Dict[str, Any] = {
+                    table_name: {**table_spec, "Keys": chunk}
+                }
                 response = await resource.batch_get_item(
                     RequestItems=request_items,
                     ReturnConsumedCapacity="TOTAL",
@@ -275,7 +340,9 @@ class DynamoDb:
     ) -> Union[Dict[str, Any], None]:
         effective_fields = fields or select
         if isinstance(effective_fields, str):
-            effective_fields = [field.strip() for field in effective_fields.split(",") if field.strip()]
+            effective_fields = [
+                field.strip() for field in effective_fields.split(",") if field.strip()
+            ]
 
         params: Dict[str, Any] = {
             "Key": {"pk": pk, "sk": sk},
@@ -317,7 +384,10 @@ class DynamoDb:
         del next_link
         requested_limit = limit
         chunk_size = min(limit, 500) if limit != 1000 else 500
-        params: Dict[str, Any] = {"ReturnConsumedCapacity": "TOTAL", "Limit": chunk_size}
+        params: Dict[str, Any] = {
+            "ReturnConsumedCapacity": "TOTAL",
+            "Limit": chunk_size,
+        }
 
         if consistent_read and lsi is False:
             params["ConsistentRead"] = True
@@ -325,13 +395,19 @@ class DynamoDb:
             params["IndexName"] = lsi
 
         if sk_begins_with is not None:
-            params["KeyConditionExpression"] = Key("pk").eq(pk) & Key("sk").begins_with(sk_begins_with)
+            params["KeyConditionExpression"] = Key("pk").eq(pk) & Key("sk").begins_with(
+                sk_begins_with
+            )
         elif active is None:
             params["KeyConditionExpression"] = Key("pk").eq(pk)
         elif active is True and pk != "tenants":
-            params["KeyConditionExpression"] = Key("pk").eq(pk) & Key("sk").begins_with(self.ACTIVE_PREFIX)
+            params["KeyConditionExpression"] = Key("pk").eq(pk) & Key("sk").begins_with(
+                self.ACTIVE_PREFIX
+            )
         elif active is False:
-            params["KeyConditionExpression"] = Key("pk").eq(pk) & Key("sk").begins_with(self.INACTIVE_PREFIX)
+            params["KeyConditionExpression"] = Key("pk").eq(pk) & Key("sk").begins_with(
+                self.INACTIVE_PREFIX
+            )
         else:
             params["KeyConditionExpression"] = Key("pk").eq(pk)
 
@@ -339,7 +415,9 @@ class DynamoDb:
             params["FilterExpression"] = build_filter(filter)
 
         if select is not None:
-            select_fields = [field.strip() for field in select.split(",") if field.strip()]
+            select_fields = [
+                field.strip() for field in select.split(",") if field.strip()
+            ]
             projection_expr, expr_attr_names = build_projection(select_fields)
             if projection_expr:
                 params["ProjectionExpression"] = projection_expr
@@ -383,7 +461,11 @@ class DynamoDb:
         append_dict: Optional[List[str]] = None,
     ) -> Union[Dict[str, Any], None]:
         del unique_fields
-        append_list = [] if append_list is None else [item for item in append_list if item in data]
+        append_list = (
+            []
+            if append_list is None
+            else [item for item in append_list if item in data]
+        )
         append_dict = [] if append_dict is None else append_dict
 
         data = self._convert_to_decimal(dict(data))
@@ -402,16 +484,24 @@ class DynamoDb:
                 update_expression_list.append(f"#{item} = if_not_exists(#{item}, :now)")
                 expression_attribute_values[":now"] = self._now_iso()
             elif item.endswith("__inc"):
-                update_expression_list.append(f"#{item} = if_not_exists(#{item}, :start) + :{item}")
+                update_expression_list.append(
+                    f"#{item} = if_not_exists(#{item}, :start) + :{item}"
+                )
                 expression_attribute_values[":start"] = 0
                 expression_attribute_values[f":{item}"] = value
             elif item in append_list:
                 list_date = data.get("list_date", self._now_iso())
-                update_expression_list.append(f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)")
+                update_expression_list.append(
+                    f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)"
+                )
                 expression_attribute_values[":empty_list"] = []
-                expression_attribute_values[":va"] = [{item: value, f"{item}_date": list_date}]
+                expression_attribute_values[":va"] = [
+                    {item: value, f"{item}_date": list_date}
+                ]
             elif item in append_dict:
-                update_expression_list.append(f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)")
+                update_expression_list.append(
+                    f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)"
+                )
                 expression_attribute_values[":empty_list"] = []
                 expression_attribute_values[":va"] = [data[item]]
             else:
@@ -445,7 +535,11 @@ class DynamoDb:
         append_dict: Optional[List[str]] = None,
     ) -> Union[Dict[str, Any], None]:
         del unique_fields
-        append_list = [] if append_list is None else [item for item in append_list if item in data]
+        append_list = (
+            []
+            if append_list is None
+            else [item for item in append_list if item in data]
+        )
         append_dict = [] if append_dict is None else append_dict
 
         data = self._convert_to_decimal(dict(data))
@@ -464,16 +558,24 @@ class DynamoDb:
                 update_expression_list.append(f"#{item} = if_not_exists(#{item}, :now)")
                 expression_attribute_values[":now"] = self._now_iso()
             elif item.endswith("__inc"):
-                update_expression_list.append(f"#{item} = if_not_exists(#{item}, :start) + :{item}")
+                update_expression_list.append(
+                    f"#{item} = if_not_exists(#{item}, :start) + :{item}"
+                )
                 expression_attribute_values[":start"] = 0
                 expression_attribute_values[f":{item}"] = value
             elif item in append_list:
                 list_date = data.get("list_date", self._now_iso())
-                update_expression_list.append(f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)")
+                update_expression_list.append(
+                    f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)"
+                )
                 expression_attribute_values[":empty_list"] = []
-                expression_attribute_values[":va"] = [{item: value, f"{item}_date": list_date}]
+                expression_attribute_values[":va"] = [
+                    {item: value, f"{item}_date": list_date}
+                ]
             elif item in append_dict:
-                update_expression_list.append(f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)")
+                update_expression_list.append(
+                    f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)"
+                )
                 expression_attribute_values[":empty_list"] = []
                 expression_attribute_values[":va"] = [data[item]]
             else:
@@ -511,7 +613,13 @@ class DynamoDb:
         delete_data = {} if delete_data is None else delete_data
 
         if sk_begins_with is not None:
-            items = self.get_all(pk=pk, sk_begins_with=sk_begins_with, select="pk,sk", item_only=True, active=None)
+            items = self.get_all(
+                pk=pk,
+                sk_begins_with=sk_begins_with,
+                select="pk,sk",
+                item_only=True,
+                active=None,
+            )
             if limit is not None:
                 items = items[:limit]
             deleted_count = 0
@@ -519,12 +627,23 @@ class DynamoDb:
             failed_items = []
             for item in items:
                 try:
-                    self.delete(pk=item["pk"], sk=item["sk"], is_purge=is_purge, delete_data=delete_data)
+                    self.delete(
+                        pk=item["pk"],
+                        sk=item["sk"],
+                        is_purge=is_purge,
+                        delete_data=delete_data,
+                    )
                     deleted_count += 1
                 except Exception as exc:
                     failed_count += 1
-                    failed_items.append({"pk": item["pk"], "sk": item["sk"], "error": str(exc)})
-            result: Dict[str, Any] = {"deleted_count": deleted_count, "failed_count": failed_count, "items_processed": len(items)}
+                    failed_items.append(
+                        {"pk": item["pk"], "sk": item["sk"], "error": str(exc)}
+                    )
+            result: Dict[str, Any] = {
+                "deleted_count": deleted_count,
+                "failed_count": failed_count,
+                "items_processed": len(items),
+            }
             if failed_items:
                 result["failed_items"] = failed_items
             return result
@@ -545,11 +664,11 @@ class DynamoDb:
         if current_record is None:
             return {"warning": "Record does not exist"}
 
-        active = "#" in current_record["sk"] and current_record["sk"].startswith(self.ACTIVE_PREFIX)
+        active = self.is_active_sk(current_record["sk"])
         if active:
             new_record = current_record.copy()
             new_record["active"] = False
-            new_sk = current_record["sk"].replace(self.ACTIVE_PREFIX, self.INACTIVE_PREFIX, 1)
+            new_sk = self.build_inactive_sk(current_record["sk"])
             for key, value in delete_data.items():
                 if key not in ["pk", "sk"]:
                     new_record[key] = value
@@ -575,7 +694,13 @@ class DynamoDb:
         delete_data = {} if delete_data is None else delete_data
 
         if sk_begins_with is not None:
-            items = await self.get_all_async(pk=pk, sk_begins_with=sk_begins_with, select="pk,sk", item_only=True, active=None)
+            items = await self.get_all_async(
+                pk=pk,
+                sk_begins_with=sk_begins_with,
+                select="pk,sk",
+                item_only=True,
+                active=None,
+            )
             if limit is not None:
                 items = items[:limit]
             deleted_count = 0
@@ -583,12 +708,23 @@ class DynamoDb:
             failed_items = []
             for item in items:
                 try:
-                    await self.delete_async(pk=item["pk"], sk=item["sk"], is_purge=is_purge, delete_data=delete_data)
+                    await self.delete_async(
+                        pk=item["pk"],
+                        sk=item["sk"],
+                        is_purge=is_purge,
+                        delete_data=delete_data,
+                    )
                     deleted_count += 1
                 except Exception as exc:
                     failed_count += 1
-                    failed_items.append({"pk": item["pk"], "sk": item["sk"], "error": str(exc)})
-            result: Dict[str, Any] = {"deleted_count": deleted_count, "failed_count": failed_count, "items_processed": len(items)}
+                    failed_items.append(
+                        {"pk": item["pk"], "sk": item["sk"], "error": str(exc)}
+                    )
+            result: Dict[str, Any] = {
+                "deleted_count": deleted_count,
+                "failed_count": failed_count,
+                "items_processed": len(items),
+            }
             if failed_items:
                 result["failed_items"] = failed_items
             return result
@@ -598,7 +734,9 @@ class DynamoDb:
 
         session = _get_aioboto3_session()
         if is_purge:
-            async with session.resource("dynamodb", region_name=self.region) as resource:
+            async with session.resource(
+                "dynamodb", region_name=self.region
+            ) as resource:
                 table = await resource.Table(self.table.name)
                 response = await table.delete_item(
                     Key={"pk": pk, "sk": sk},
@@ -612,11 +750,11 @@ class DynamoDb:
         if current_record is None:
             return {"warning": "Record does not exist"}
 
-        active = "#" in current_record["sk"] and current_record["sk"].startswith(self.ACTIVE_PREFIX)
+        active = self.is_active_sk(current_record["sk"])
         if active:
             new_record = current_record.copy()
             new_record["active"] = False
-            new_sk = current_record["sk"].replace(self.ACTIVE_PREFIX, self.INACTIVE_PREFIX, 1)
+            new_sk = self.build_inactive_sk(current_record["sk"])
             for key, value in delete_data.items():
                 if key not in ["pk", "sk"]:
                     new_record[key] = value
@@ -632,14 +770,20 @@ class DynamoDb:
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
         return response
 
-    def soft_delete(self, pk: str, sk: str, delete_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def soft_delete(
+        self, pk: str, sk: str, delete_data: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return self.delete(pk=pk, sk=sk, is_purge=False, delete_data=delete_data)
 
     def hard_delete(self, pk: str, sk: str) -> Dict[str, Any]:
         return self.delete(pk=pk, sk=sk, is_purge=True)
 
-    async def soft_delete_async(self, pk: str, sk: str, delete_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        return await self.delete_async(pk=pk, sk=sk, is_purge=False, delete_data=delete_data)
+    async def soft_delete_async(
+        self, pk: str, sk: str, delete_data: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        return await self.delete_async(
+            pk=pk, sk=sk, is_purge=False, delete_data=delete_data
+        )
 
     async def hard_delete_async(self, pk: str, sk: str) -> Dict[str, Any]:
         return await self.delete_async(pk=pk, sk=sk, is_purge=True)
@@ -659,7 +803,9 @@ class DynamoDb:
 
         if select is not None:
             if isinstance(select, str):
-                select_fields = [field.strip() for field in select.split(",") if field.strip()]
+                select_fields = [
+                    field.strip() for field in select.split(",") if field.strip()
+                ]
             else:
                 select_fields = select
             projection_expr, expr_attr_names = build_projection(select_fields)
@@ -698,7 +844,9 @@ class DynamoDb:
 
         if select is not None:
             if isinstance(select, str):
-                select_fields = [field.strip() for field in select.split(",") if field.strip()]
+                select_fields = [
+                    field.strip() for field in select.split(",") if field.strip()
+                ]
             else:
                 select_fields = select
             projection_expr, expr_attr_names = build_projection(select_fields)

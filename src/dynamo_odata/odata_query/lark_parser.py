@@ -66,26 +66,26 @@ identifier: ODATA_IDENTIFIER
         | GUID
         | STRING
 
-EXISTS.3: "exists"i
-NOT_EXISTS.3: "not_exists"i
-BETWEEN.3: "between"i
-AND.3: "and"i
-OR.3: "or"i
-NOT.3: "not"i
-EQ.3: "eq"i
-NE.3: "ne"i
-LT.3: "lt"i
-LE.3: "le"i
-GT.3: "gt"i
-GE.3: "ge"i
-IN.3: "in"i
-ADD.3: "add"i
-SUB.3: "sub"i
-MUL.3: "mul"i
-DIV.3: "div"i
-MOD.3: "mod"i
-NULL.3: "null"i
-BOOLEAN.3: "true"i | "false"i
+EXISTS.3: /exists(?![\w.])/i
+NOT_EXISTS.3: /not_exists(?![\w.])/i
+BETWEEN.3: /between(?![\w.])/i
+AND.3: /and(?![\w.])/i
+OR.3: /or(?![\w.])/i
+NOT.3: /not(?![\w.])/i
+EQ.3: /eq(?![\w.])/i
+NE.3: /ne(?![\w.])/i
+LT.3: /lt(?![\w.])/i
+LE.3: /le(?![\w.])/i
+GT.3: /gt(?![\w.])/i
+GE.3: /ge(?![\w.])/i
+IN.3: /in(?![\w.])/i
+ADD.3: /add(?![\w.])/i
+SUB.3: /sub(?![\w.])/i
+MUL.3: /mul(?![\w.])/i
+DIV.3: /div(?![\w.])/i
+MOD.3: /mod(?![\w.])/i
+NULL.3: /null(?![\w.])/i
+BOOLEAN.3: /true(?![\w.])/i | /false(?![\w.])/i
 DURATION.3: /duration'[+-]?P(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+(?:\.\d+)?S)?)?'/i
 DATETIME.3: /[1-9]\d{3}-(?:0\d|1[0-2])-(?:[0-2]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,12})?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)?/
 DATE.3: /[1-9]\d{3}-(?:0\d|1[0-2])-(?:[0-2]\d|3[01])/
@@ -201,10 +201,10 @@ class ODataTransformer(Transformer):
         return ast.BinOp(items[1], items[0], items[2])
 
     def unary_not(self, items):
-        return ast.UnaryOp(ast.Not(), items[0])
+        return ast.UnaryOp(ast.Not(), items[-1])
 
     def unary_minus(self, items):
-        return ast.UnaryOp(ast.USub(), items[0])
+        return ast.UnaryOp(ast.USub(), items[-1])
 
     def postfix_func(self, items):
         return ast.Function(items[1], items[0])

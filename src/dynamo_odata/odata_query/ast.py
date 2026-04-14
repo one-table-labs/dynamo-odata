@@ -1,7 +1,8 @@
 import datetime as dt
 import re
 from dataclasses import dataclass, field
-from typing import List as ListType, Optional, Tuple
+from typing import List as ListType
+from typing import Optional, Tuple
 from uuid import UUID
 
 from dateutil.parser import isoparse
@@ -43,6 +44,7 @@ class Null(_Literal):
     @property
     def py_val(self) -> None:
         return None
+
 
 @dataclass(frozen=True)
 class Integer(_Literal):
@@ -213,9 +215,11 @@ class BinOp(_Node):
 class _Comparator(_Node):
     pass
 
+
 @dataclass(frozen=True)
 class _Function(_Node):
     pass
+
 
 @dataclass(frozen=True)
 class Eq(_Comparator):
@@ -251,19 +255,23 @@ class GtE(_Comparator):
 class In(_Comparator):
     pass
 
+
 @dataclass(frozen=True)
 class Between(_Comparator):
     pass
 
+
 # @dataclass(frozen=True)
 # class Exists(_Comparator):
 #     pass
+
 
 @dataclass(frozen=True)
 class Compare(_Node):
     comparator: _Comparator
     left: _Node
     right: _Node
+
 
 @dataclass(frozen=True)
 class Function(_Node):
@@ -328,15 +336,18 @@ class Call(_Node):
     func: Identifier
     args: ListType[_Node]
 
+
 @dataclass(frozen=True)
 class Exists(_Node):
     pass
     # func: Function
     # args: ListType[_Node]
 
+
 @dataclass(frozen=True)
 class Not_Exists(_Node):
     pass
+
 
 ###############################################################################
 # Collections
