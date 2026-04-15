@@ -2,9 +2,7 @@ from . import ast
 from .rewrite import IdentifierStripper
 
 
-def expression_relative_to_identifier(
-    identifier: ast.Identifier, expression: ast._Node
-) -> ast._Node:
+def expression_relative_to_identifier(identifier: ast.Identifier, expression: ast._Node) -> ast._Node:
     """
     Shorthand for the :class:`IdentifierStripper`.
 
@@ -16,5 +14,4 @@ def expression_relative_to_identifier(
         The ``expression`` relative to the ``identifier``.
     """
     stripper = IdentifierStripper(identifier)
-    result = stripper.visit(expression)
-    return result
+    return stripper.visit(expression)

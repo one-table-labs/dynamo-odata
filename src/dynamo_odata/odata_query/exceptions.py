@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 
 class ODataException(Exception):
@@ -6,7 +6,6 @@ class ODataException(Exception):
     Base class for all exceptions in this library.
     """
 
-    pass
 
 
 class ODataSyntaxError(ODataException):
@@ -14,7 +13,6 @@ class ODataSyntaxError(ODataException):
     Base class for syntax errors.
     """
 
-    pass
 
 
 class TokenizingException(ODataSyntaxError):
@@ -32,7 +30,7 @@ class ParsingException(ODataSyntaxError):
     Thrown when the parser cannot parse the query.
     """
 
-    def __init__(self, token: Optional[Any], eof: bool = False):
+    def __init__(self, token: Any | None, eof: bool = False):
         self.token = token
         self.eof = eof
         super().__init__(f"Failed to parse at: {token}")
@@ -43,7 +41,6 @@ class FunctionCallException(ODataException):
     Base class for errors in function calls.
     """
 
-    pass
 
 
 class UnknownFunctionException(FunctionCallException):
@@ -98,9 +95,9 @@ class ArgumentTypeException(FunctionCallException):
 
     def __init__(
         self,
-        function_name: Optional[str] = None,
-        expected_type: Optional[str] = None,
-        actual_type: Optional[str] = None,
+        function_name: str | None = None,
+        expected_type: str | None = None,
+        actual_type: str | None = None,
     ):
         self.function_name = function_name
         self.expected_type = expected_type

@@ -1,10 +1,11 @@
+from collections.abc import Iterator
 from dataclasses import fields
-from typing import Any, Iterator, Tuple
+from typing import Any
 
 from . import ast
 
 
-def iter_dataclass_fields(node: ast._Node) -> Iterator[Tuple[str, Any]]:
+def iter_dataclass_fields(node: ast._Node) -> Iterator[tuple[str, Any]]:
     """
     Loops over all fields of the given node, yielding the field's name and
     the current value.
@@ -48,7 +49,7 @@ class NodeVisitor:
         Visits all fields on ``node`` recursively.
         Called if no explicit visitor method exists for a node.
         """
-        for field, value in iter_dataclass_fields(node):
+        for _field, value in iter_dataclass_fields(node):
             if isinstance(value, list):
                 for item in value:
                     if isinstance(item, ast._Node):
