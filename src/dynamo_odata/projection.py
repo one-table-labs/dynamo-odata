@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Dict, Iterable, Optional, Tuple
+from collections.abc import Iterable
 
 
 def build_projection(
-    fields: Optional[Iterable[str]],
-) -> Tuple[Optional[str], Dict[str, str]]:
+    fields: Iterable[str] | None,
+) -> tuple[str | None, dict[str, str]]:
     """Build a DynamoDB ProjectionExpression from a list of field names.
 
     All fields are aliased via ExpressionAttributeNames to avoid conflicts
@@ -23,7 +23,7 @@ def build_projection(
         return None, {}
 
     expression_parts = []
-    expression_attribute_names: Dict[str, str] = {}
+    expression_attribute_names: dict[str, str] = {}
 
     for field in fields:
         if not field:

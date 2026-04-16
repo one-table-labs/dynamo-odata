@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from dynamo_odata import DynamoDb
 
 
@@ -32,11 +34,8 @@ class TestKeyHelpers:
 
     def test_build_pk_rejects_empty_parts(self):
         db = _make_db()
-        try:
+        with pytest.raises(ValueError):
             db.build_pk("", "  ")
-            assert False, "Expected ValueError"
-        except ValueError:
-            assert True
 
     def test_sk_helpers_default_separator(self):
         db = _make_db()

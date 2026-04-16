@@ -13,10 +13,10 @@ from .regulated import (
 )
 
 __all__ = [
-    "AuditHook",
     "DEFAULT_ALLOWED_COMPARATORS",
     "DEFAULT_ALLOWED_FUNCTIONS",
     "DEFAULT_FORBIDDEN_RESPONSE_FIELDS",
+    "AuditHook",
     "NoOpAuditHook",
     "RegulatedProfile",
     "apply_response_allowlist",

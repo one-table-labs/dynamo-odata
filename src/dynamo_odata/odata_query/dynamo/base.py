@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 from .. import ast, exceptions, visitor
 
@@ -15,16 +14,14 @@ class AstToDynamoVisitor(visitor.NodeVisitor):
         table_alias: Optional alias for the root table.
     """
 
-    def __init__(self, table_alias: Optional[str] = None):
+    def __init__(self, table_alias: str | None = None):
         super().__init__()
         self.table_alias = table_alias
 
     def visit_Identifier(self, node: ast.Identifier) -> str:
         ":meta private:"
         # Reconstruct full dotted path (e.g. item_information.created.create_date)
-        full_name = (
-            ".".join((*node.namespace, node.name)) if node.namespace else node.name
-        )
+        full_name = ".".join((*node.namespace, node.name)) if node.namespace else node.name
         attr_name = f'"{full_name}"'
 
         if self.table_alias:
@@ -163,7 +160,6 @@ class AstToDynamoVisitor(visitor.NodeVisitor):
     def visit_In(self, node: ast.In) -> str:
         ":meta private:"
         return "is_in"
-        # return "in"
 
     def visit_Between(self, node: ast.Between) -> str:
         ":meta private:"
@@ -198,23 +194,18 @@ class AstToDynamoVisitor(visitor.NodeVisitor):
         # and would raise an AttributeError during eval().
         if isinstance(node.right, ast.Null):
             if isinstance(node.comparator, ast.Eq):
-                return (
-                    f"(Attr({left}).not_exists() | Attr({left}).attribute_type('NULL'))"
-                )
-            elif isinstance(node.comparator, ast.NotEq):
+                return f"(Attr({left}).not_exists() | Attr({left}).attribute_type('NULL'))"
+            if isinstance(node.comparator, ast.NotEq):
                 return f"(Attr({left}).exists() & ~Attr({left}).attribute_type('NULL'))"
 
         # BETWEEN requires two separate positional args: between(low, high)
         # The OData list_expr `(low, high)` is an ast.List, so destructure it.
-        if isinstance(node.comparator, ast.Between):
-            if isinstance(node.right, ast.List) and len(node.right.val) == 2:
-                low = self.visit(node.right.val[0])
-                high = self.visit(node.right.val[1])
-                return f"Attr({left}).between({low}, {high})"
+        if isinstance(node.comparator, ast.Between) and isinstance(node.right, ast.List) and len(node.right.val) == 2:
+            low = self.visit(node.right.val[0])
+            high = self.visit(node.right.val[1])
+            return f"Attr({left}).between({low}, {high})"
 
         return f"Attr({left}).{comparator}({right})"
-
-        # return f"{left} {comparator} {right}"
 
     def visit_And(self, node: ast.And) -> str:
         ":meta private:"
@@ -264,8 +255,8 @@ class AstToDynamoVisitor(visitor.NodeVisitor):
             # Grammar has already validated that the function is valid OData,
             # but that doesn't guarantee we can represent it in DynamoDB.
             func_gen = getattr(self, "func_" + node.func.name.lower())
-        except AttributeError:
-            raise exceptions.UnsupportedFunctionException(node.func.name)
+        except AttributeError as err:
+            raise exceptions.UnsupportedFunctionException(node.func.name) from err
 
         return func_gen(*node.args)
 
@@ -289,13 +280,6 @@ class AstToDynamoVisitor(visitor.NodeVisitor):
             res = "'" + prefix + res + suffix + "'"
         return res
 
-    # def visit_Eq(self, node: ast.Eq) -> str:
-    #     ":meta private:"
-    #     return "eq"
-
-    # def visit_Contains(self, node: ast.Eq) -> str:
-    #     ":meta private:"
-    #     return "contains"
     def func_between(self, *args: ast._Node) -> str:
         ":meta private:"
         args_sql = [self.visit(arg) for arg in args]
@@ -314,9 +298,7 @@ class AstToDynamoVisitor(visitor.NodeVisitor):
     def func_endswith(self, *args: ast._Node) -> str:
         ":meta private:"
         # DynamoDB FilterExpression has no ends-with / suffix-match operation.
-        raise exceptions.UnsupportedFunctionException(
-            "endswith is not supported by DynamoDB FilterExpression"
-        )
+        raise exceptions.UnsupportedFunctionException("endswith is not supported by DynamoDB FilterExpression")
 
     def func_indexof(self, *args: ast._Node) -> str:
         ":meta private:"

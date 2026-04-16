@@ -52,9 +52,7 @@ class TestUppercaseKeySchema:
 
         db.batch_get("TENANT#1", ["USER#1"], item_only=True)
 
-        request_keys = db.db.batch_get_item.call_args.kwargs["RequestItems"][
-            "table_dev"
-        ]["Keys"]
+        request_keys = db.db.batch_get_item.call_args.kwargs["RequestItems"]["table_dev"]["Keys"]
         assert request_keys == [{"PK": "TENANT#1", "SK": "1#USER#1"}]
 
     def test_put_strips_uppercase_key_fields_from_data(self):
@@ -94,9 +92,7 @@ class TestUppercaseKeySchema:
     def test_soft_delete_reads_uppercase_sort_key(self):
         db = _make_db()
         db.table.delete_item.return_value = {"Attributes": {"PK": "TENANT#1"}}
-        db.get = MagicMock(
-            return_value={"PK": "TENANT#1", "SK": "1#USER#1", "name": "Ada"}
-        )
+        db.get = MagicMock(return_value={"PK": "TENANT#1", "SK": "1#USER#1", "name": "Ada"})
         db.put = MagicMock(return_value={})
 
         db.soft_delete("TENANT#1", "1#USER#1", {"deleted_reason": "test"})

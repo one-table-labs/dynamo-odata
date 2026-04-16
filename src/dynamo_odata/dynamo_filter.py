@@ -129,9 +129,7 @@ class AstToDynamoConditionVisitor(visitor.NodeVisitor):
             return self.visit(node)
         if isinstance(node, ast.Call) and node.func.name.lower() == "tolower":
             return self._field_name(node.args[0]).lower()
-        raise exceptions.ArgumentTypeException(
-            "field", "Identifier", type(node).__name__
-        )
+        raise exceptions.ArgumentTypeException("field", "Identifier", type(node).__name__)
 
 
 def validate_filter(filter_str: str, policy: FilterPolicy) -> ast._Node:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -29,7 +29,7 @@ class DynamoDb:
     def __init__(
         self,
         table_name: str,
-        region: Optional[str] = None,
+        region: str | None = None,
         resource: Any = None,
         key_schema: KeySchema | None = None,
         partition_key_guard: PartitionKeyGuard | None = None,
@@ -66,12 +66,7 @@ class DynamoDb:
 
     @staticmethod
     def _now_iso() -> str:
-        return (
-            datetime.now(timezone.utc)
-            .replace(microsecond=0)
-            .isoformat()
-            .replace("+00:00", "Z")
-        )
+        return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
     def add_consumed_capacity(self, consumed_capacity: Any) -> None:
         if not consumed_capacity:
@@ -85,10 +80,10 @@ class DynamoDb:
             if capacity_units is not None:
                 self.consumed_capacity += float(capacity_units)
 
-    def _key_dict(self, pk: str, sk: str) -> Dict[str, str]:
+    def _key_dict(self, pk: str, sk: str) -> dict[str, str]:
         return {self.partition_key_name: pk, self.sort_key_name: sk}
 
-    def _strip_key_attributes(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _strip_key_attributes(self, data: dict[str, Any]) -> dict[str, Any]:
         data.pop(self.partition_key_name, None)
         data.pop(self.sort_key_name, None)
         return data
@@ -100,7 +95,7 @@ class DynamoDb:
     def _build_filter_expression(self, filter_str: str) -> Any:
         return build_filter(filter_str, policy=self.filter_policy)
 
-    def _normalize_sks(self, pk: str, sks: List[str]) -> List[Dict[str, str]]:
+    def _normalize_sks(self, pk: str, sks: list[str]) -> list[dict[str, str]]:
         return [
             self._key_dict(
                 pk,
@@ -141,9 +136,7 @@ class DynamoDb:
     @staticmethod
     def _convert_to_decimal(value: Any) -> Any:
         if isinstance(value, dict):
-            return {
-                key: DynamoDb._convert_to_decimal(item) for key, item in value.items()
-            }
+            return {key: DynamoDb._convert_to_decimal(item) for key, item in value.items()}
         if isinstance(value, list):
             return [DynamoDb._convert_to_decimal(item) for item in value]
         if isinstance(value, (int, float)):
@@ -157,20 +150,18 @@ class DynamoDb:
         self,
         pk: str,
         sk: str,
-        fields: Union[List[str], str, None] = None,
-        select: Union[List[str], str, None] = None,
+        fields: list[str] | str | None = None,
+        select: list[str] | str | None = None,
         item_only: bool = False,
         none_is_empy_dict: bool = False,
         consistent_read: bool = False,
-    ) -> Union[Dict[str, Any], None]:
+    ) -> dict[str, Any] | None:
         self._validate_partition_key(pk)
         effective_fields = fields or select
         if isinstance(effective_fields, str):
-            effective_fields = [
-                field.strip() for field in effective_fields.split(",") if field.strip()
-            ]
+            effective_fields = [field.strip() for field in effective_fields.split(",") if field.strip()]
 
-        params: Dict[str, Any] = {
+        params: dict[str, Any] = {
             "Key": self._key_dict(pk, sk),
             "ReturnConsumedCapacity": "TOTAL",
             "ConsistentRead": consistent_read,
@@ -193,22 +184,22 @@ class DynamoDb:
     def get_all(
         self,
         pk: str,
-        filter: Optional[str] = None,
-        select: Optional[str] = None,
+        filter: str | None = None,
+        select: str | None = None,
         limit: int = 1000,
-        skip_token: Optional[Dict[str, Any]] = None,
-        active: Optional[bool] = True,
-        next_link: Optional[str] = None,
+        skip_token: dict[str, Any] | None = None,
+        active: bool | None = True,
+        next_link: str | None = None,
         item_only: bool = False,
-        sk_begins_with: Optional[str] = None,
-        lsi: Union[bool, str] = False,
+        sk_begins_with: str | None = None,
+        lsi: bool | str = False,
         consistent_read: bool = False,
-    ) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
+    ) -> dict[str, Any] | list[dict[str, Any]]:
         self._validate_partition_key(pk)
         del next_link
         requested_limit = limit
         chunk_size = min(limit, 500) if limit != 1000 else 500
-        params: Dict[str, Any] = {
+        params: dict[str, Any] = {
             "ReturnConsumedCapacity": "TOTAL",
             "Limit": chunk_size,
         }
@@ -219,19 +210,19 @@ class DynamoDb:
             params["IndexName"] = lsi
 
         if sk_begins_with is not None:
-            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(
-                pk
-            ) & Key(self.sort_key_name).begins_with(sk_begins_with)
+            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk) & Key(
+                self.sort_key_name
+            ).begins_with(sk_begins_with)
         elif active is None:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk)
         elif active is True and pk != "tenants":
-            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(
-                pk
-            ) & Key(self.sort_key_name).begins_with(self.ACTIVE_PREFIX)
+            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk) & Key(
+                self.sort_key_name
+            ).begins_with(self.ACTIVE_PREFIX)
         elif active is False:
-            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(
-                pk
-            ) & Key(self.sort_key_name).begins_with(self.INACTIVE_PREFIX)
+            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk) & Key(
+                self.sort_key_name
+            ).begins_with(self.INACTIVE_PREFIX)
         else:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk)
 
@@ -239,9 +230,7 @@ class DynamoDb:
             params["FilterExpression"] = self._build_filter_expression(filter)
 
         if select is not None:
-            select_fields = [
-                field.strip() for field in select.split(",") if field.strip()
-            ]
+            select_fields = [field.strip() for field in select.split(",") if field.strip()]
             projection_expr, expr_attr_names = build_projection(select_fields)
             if projection_expr:
                 params["ProjectionExpression"] = projection_expr
@@ -251,7 +240,7 @@ class DynamoDb:
         if skip_token is not None:
             params["ExclusiveStartKey"] = skip_token
 
-        items: List[Dict[str, Any]] = []
+        items: list[dict[str, Any]] = []
         last_evaluated_key: Any = True
         while last_evaluated_key is not None:
             if len(items) >= requested_limit and requested_limit != 1000:
@@ -274,18 +263,18 @@ class DynamoDb:
     def batch_get(
         self,
         pk: str,
-        sks: List[str],
-        fields: Optional[List[str]] = None,
+        sks: list[str],
+        fields: list[str] | None = None,
         item_only: bool = False,
         consistent_read: bool = False,
-    ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         self._validate_partition_key(pk)
         if len(sks) < 1:
             return []
 
         keys = self._normalize_sks(pk, sks)
         table_name = self.table.name
-        table_spec: Dict[str, Any] = {}
+        table_spec: dict[str, Any] = {}
         if consistent_read:
             table_spec["ConsistentRead"] = True
         if fields is not None:
@@ -296,12 +285,12 @@ class DynamoDb:
                     table_spec["ExpressionAttributeNames"] = expr_attr_names
 
         batch_chunk = 100
-        all_items: List[Dict[str, Any]] = []
+        all_items: list[dict[str, Any]] = []
         pending_keys = keys
 
         while pending_keys:
             chunk, pending_keys = pending_keys[:batch_chunk], pending_keys[batch_chunk:]
-            request_items: Dict[str, Any] = {table_name: {**table_spec, "Keys": chunk}}
+            request_items: dict[str, Any] = {table_name: {**table_spec, "Keys": chunk}}
             response = self.db.batch_get_item(
                 RequestItems=request_items,
                 ReturnConsumedCapacity="TOTAL",
@@ -320,11 +309,11 @@ class DynamoDb:
     async def batch_get_async(
         self,
         pk: str,
-        sks: List[str],
-        fields: Optional[List[str]] = None,
+        sks: list[str],
+        fields: list[str] | None = None,
         item_only: bool = False,
         consistent_read: bool = False,
-    ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         self._validate_partition_key(pk)
         if not sks:
             return []
@@ -333,7 +322,7 @@ class DynamoDb:
         table_name = self.table.name
         keys = self._normalize_sks(pk, sks)
 
-        table_spec: Dict[str, Any] = {}
+        table_spec: dict[str, Any] = {}
         if consistent_read:
             table_spec["ConsistentRead"] = True
         if fields is not None:
@@ -344,7 +333,7 @@ class DynamoDb:
                     table_spec["ExpressionAttributeNames"] = expr_attr_names
 
         batch_chunk = 100
-        all_items: List[Dict[str, Any]] = []
+        all_items: list[dict[str, Any]] = []
         pending_keys = keys
 
         async with session.resource("dynamodb", region_name=self.region) as resource:
@@ -353,9 +342,7 @@ class DynamoDb:
                     pending_keys[:batch_chunk],
                     pending_keys[batch_chunk:],
                 )
-                request_items: Dict[str, Any] = {
-                    table_name: {**table_spec, "Keys": chunk}
-                }
+                request_items: dict[str, Any] = {table_name: {**table_spec, "Keys": chunk}}
                 response = await resource.batch_get_item(
                     RequestItems=request_items,
                     ReturnConsumedCapacity="TOTAL",
@@ -375,20 +362,18 @@ class DynamoDb:
         self,
         pk: str,
         sk: str,
-        fields: Union[List[str], str, None] = None,
-        select: Union[List[str], str, None] = None,
+        fields: list[str] | str | None = None,
+        select: list[str] | str | None = None,
         item_only: bool = False,
         none_is_empy_dict: bool = False,
         consistent_read: bool = False,
-    ) -> Union[Dict[str, Any], None]:
+    ) -> dict[str, Any] | None:
         self._validate_partition_key(pk)
         effective_fields = fields or select
         if isinstance(effective_fields, str):
-            effective_fields = [
-                field.strip() for field in effective_fields.split(",") if field.strip()
-            ]
+            effective_fields = [field.strip() for field in effective_fields.split(",") if field.strip()]
 
-        params: Dict[str, Any] = {
+        params: dict[str, Any] = {
             "Key": self._key_dict(pk, sk),
             "ReturnConsumedCapacity": "TOTAL",
             "ConsistentRead": consistent_read,
@@ -414,22 +399,22 @@ class DynamoDb:
     async def get_all_async(
         self,
         pk: str,
-        filter: Optional[str] = None,
-        select: Optional[str] = None,
+        filter: str | None = None,
+        select: str | None = None,
         limit: int = 1000,
-        skip_token: Optional[Dict[str, Any]] = None,
-        active: Optional[bool] = True,
-        next_link: Optional[str] = None,
+        skip_token: dict[str, Any] | None = None,
+        active: bool | None = True,
+        next_link: str | None = None,
         item_only: bool = False,
-        sk_begins_with: Optional[str] = None,
-        lsi: Union[bool, str] = False,
+        sk_begins_with: str | None = None,
+        lsi: bool | str = False,
         consistent_read: bool = False,
-    ) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
+    ) -> dict[str, Any] | list[dict[str, Any]]:
         self._validate_partition_key(pk)
         del next_link
         requested_limit = limit
         chunk_size = min(limit, 500) if limit != 1000 else 500
-        params: Dict[str, Any] = {
+        params: dict[str, Any] = {
             "ReturnConsumedCapacity": "TOTAL",
             "Limit": chunk_size,
         }
@@ -440,19 +425,19 @@ class DynamoDb:
             params["IndexName"] = lsi
 
         if sk_begins_with is not None:
-            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(
-                pk
-            ) & Key(self.sort_key_name).begins_with(sk_begins_with)
+            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk) & Key(
+                self.sort_key_name
+            ).begins_with(sk_begins_with)
         elif active is None:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk)
         elif active is True and pk != "tenants":
-            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(
-                pk
-            ) & Key(self.sort_key_name).begins_with(self.ACTIVE_PREFIX)
+            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk) & Key(
+                self.sort_key_name
+            ).begins_with(self.ACTIVE_PREFIX)
         elif active is False:
-            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(
-                pk
-            ) & Key(self.sort_key_name).begins_with(self.INACTIVE_PREFIX)
+            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk) & Key(
+                self.sort_key_name
+            ).begins_with(self.INACTIVE_PREFIX)
         else:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk)
 
@@ -460,9 +445,7 @@ class DynamoDb:
             params["FilterExpression"] = self._build_filter_expression(filter)
 
         if select is not None:
-            select_fields = [
-                field.strip() for field in select.split(",") if field.strip()
-            ]
+            select_fields = [field.strip() for field in select.split(",") if field.strip()]
             projection_expr, expr_attr_names = build_projection(select_fields)
             if projection_expr:
                 params["ProjectionExpression"] = projection_expr
@@ -472,7 +455,7 @@ class DynamoDb:
         if skip_token is not None:
             params["ExclusiveStartKey"] = skip_token
 
-        items: List[Dict[str, Any]] = []
+        items: list[dict[str, Any]] = []
         last_evaluated_key: Any = True
         session = _get_aioboto3_session()
         async with session.resource("dynamodb", region_name=self.region) as resource:
@@ -500,25 +483,21 @@ class DynamoDb:
         pk: str,
         sk: str,
         data: dict,
-        unique_fields: Optional[List[str]] = None,
+        unique_fields: list[str] | None = None,
         item_only: bool = False,
-        append_list: Optional[List[str]] = None,
-        append_dict: Optional[List[str]] = None,
-    ) -> Union[Dict[str, Any], None]:
+        append_list: list[str] | None = None,
+        append_dict: list[str] | None = None,
+    ) -> dict[str, Any] | None:
         self._validate_partition_key(pk)
         del unique_fields
-        append_list = (
-            []
-            if append_list is None
-            else [item for item in append_list if item in data]
-        )
+        append_list = [] if append_list is None else [item for item in append_list if item in data]
         append_dict = [] if append_dict is None else append_dict
 
         data = self._strip_key_attributes(self._convert_to_decimal(dict(data)))
 
         update_expression_list = []
-        expression_attribute_values: Dict[str, Any] = {}
-        expression_attribute_names: Dict[str, str] = {}
+        expression_attribute_values: dict[str, Any] = {}
+        expression_attribute_names: dict[str, str] = {}
 
         for item, value in data.items():
             if item == "list_date":
@@ -528,31 +507,23 @@ class DynamoDb:
                 update_expression_list.append(f"#{item} = if_not_exists(#{item}, :now)")
                 expression_attribute_values[":now"] = self._now_iso()
             elif item.endswith("__inc"):
-                update_expression_list.append(
-                    f"#{item} = if_not_exists(#{item}, :start) + :{item}"
-                )
+                update_expression_list.append(f"#{item} = if_not_exists(#{item}, :start) + :{item}")
                 expression_attribute_values[":start"] = 0
                 expression_attribute_values[f":{item}"] = value
             elif item in append_list:
                 list_date = data.get("list_date", self._now_iso())
-                update_expression_list.append(
-                    f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)"
-                )
+                update_expression_list.append(f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)")
                 expression_attribute_values[":empty_list"] = []
-                expression_attribute_values[":va"] = [
-                    {item: value, f"{item}_date": list_date}
-                ]
+                expression_attribute_values[":va"] = [{item: value, f"{item}_date": list_date}]
             elif item in append_dict:
-                update_expression_list.append(
-                    f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)"
-                )
+                update_expression_list.append(f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)")
                 expression_attribute_values[":empty_list"] = []
                 expression_attribute_values[":va"] = [data[item]]
             else:
                 update_expression_list.append(f"#{item}=:{item}")
                 expression_attribute_values[f":{item}"] = value
 
-        params: Dict[str, Any] = {
+        params: dict[str, Any] = {
             "Key": self._key_dict(pk, sk),
             "UpdateExpression": "SET " + ",".join(update_expression_list),
             "ExpressionAttributeValues": expression_attribute_values,
@@ -573,25 +544,21 @@ class DynamoDb:
         pk: str,
         sk: str,
         data: dict,
-        unique_fields: Optional[List[str]] = None,
+        unique_fields: list[str] | None = None,
         item_only: bool = False,
-        append_list: Optional[List[str]] = None,
-        append_dict: Optional[List[str]] = None,
-    ) -> Union[Dict[str, Any], None]:
+        append_list: list[str] | None = None,
+        append_dict: list[str] | None = None,
+    ) -> dict[str, Any] | None:
         self._validate_partition_key(pk)
         del unique_fields
-        append_list = (
-            []
-            if append_list is None
-            else [item for item in append_list if item in data]
-        )
+        append_list = [] if append_list is None else [item for item in append_list if item in data]
         append_dict = [] if append_dict is None else append_dict
 
         data = self._strip_key_attributes(self._convert_to_decimal(dict(data)))
 
         update_expression_list = []
-        expression_attribute_values: Dict[str, Any] = {}
-        expression_attribute_names: Dict[str, str] = {}
+        expression_attribute_values: dict[str, Any] = {}
+        expression_attribute_names: dict[str, str] = {}
 
         for item, value in data.items():
             if item == "list_date":
@@ -601,31 +568,23 @@ class DynamoDb:
                 update_expression_list.append(f"#{item} = if_not_exists(#{item}, :now)")
                 expression_attribute_values[":now"] = self._now_iso()
             elif item.endswith("__inc"):
-                update_expression_list.append(
-                    f"#{item} = if_not_exists(#{item}, :start) + :{item}"
-                )
+                update_expression_list.append(f"#{item} = if_not_exists(#{item}, :start) + :{item}")
                 expression_attribute_values[":start"] = 0
                 expression_attribute_values[f":{item}"] = value
             elif item in append_list:
                 list_date = data.get("list_date", self._now_iso())
-                update_expression_list.append(
-                    f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)"
-                )
+                update_expression_list.append(f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)")
                 expression_attribute_values[":empty_list"] = []
-                expression_attribute_values[":va"] = [
-                    {item: value, f"{item}_date": list_date}
-                ]
+                expression_attribute_values[":va"] = [{item: value, f"{item}_date": list_date}]
             elif item in append_dict:
-                update_expression_list.append(
-                    f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)"
-                )
+                update_expression_list.append(f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)")
                 expression_attribute_values[":empty_list"] = []
                 expression_attribute_values[":va"] = [data[item]]
             else:
                 update_expression_list.append(f"#{item}=:{item}")
                 expression_attribute_values[f":{item}"] = value
 
-        params: Dict[str, Any] = {
+        params: dict[str, Any] = {
             "Key": self._key_dict(pk, sk),
             "UpdateExpression": "SET " + ",".join(update_expression_list),
             "ExpressionAttributeValues": expression_attribute_values,
@@ -647,12 +606,12 @@ class DynamoDb:
     def delete(
         self,
         pk: str,
-        sk: Optional[str] = None,
+        sk: str | None = None,
         is_purge: bool = False,
-        delete_data: Optional[Dict[str, Any]] = None,
-        sk_begins_with: Optional[str] = None,
-        limit: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        delete_data: dict[str, Any] | None = None,
+        sk_begins_with: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
         self._validate_partition_key(pk)
         delete_data = {} if delete_data is None else delete_data
 
@@ -687,7 +646,7 @@ class DynamoDb:
                             "error": str(exc),
                         }
                     )
-            result: Dict[str, Any] = {
+            result: dict[str, Any] = {
                 "deleted_count": deleted_count,
                 "failed_count": failed_count,
                 "items_processed": len(items),
@@ -733,12 +692,12 @@ class DynamoDb:
     async def delete_async(
         self,
         pk: str,
-        sk: Optional[str] = None,
+        sk: str | None = None,
         is_purge: bool = False,
-        delete_data: Optional[Dict[str, Any]] = None,
-        sk_begins_with: Optional[str] = None,
-        limit: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        delete_data: dict[str, Any] | None = None,
+        sk_begins_with: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
         self._validate_partition_key(pk)
         delete_data = {} if delete_data is None else delete_data
 
@@ -773,7 +732,7 @@ class DynamoDb:
                             "error": str(exc),
                         }
                     )
-            result: Dict[str, Any] = {
+            result: dict[str, Any] = {
                 "deleted_count": deleted_count,
                 "failed_count": failed_count,
                 "items_processed": len(items),
@@ -787,9 +746,7 @@ class DynamoDb:
 
         session = _get_aioboto3_session()
         if is_purge:
-            async with session.resource(
-                "dynamodb", region_name=self.region
-            ) as resource:
+            async with session.resource("dynamodb", region_name=self.region) as resource:
                 table = await resource.Table(self.table.name)
                 response = await table.delete_item(
                     Key=self._key_dict(pk, sk),
@@ -823,42 +780,34 @@ class DynamoDb:
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
         return response
 
-    def soft_delete(
-        self, pk: str, sk: str, delete_data: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def soft_delete(self, pk: str, sk: str, delete_data: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.delete(pk=pk, sk=sk, is_purge=False, delete_data=delete_data)
 
-    def hard_delete(self, pk: str, sk: str) -> Dict[str, Any]:
+    def hard_delete(self, pk: str, sk: str) -> dict[str, Any]:
         return self.delete(pk=pk, sk=sk, is_purge=True)
 
-    async def soft_delete_async(
-        self, pk: str, sk: str, delete_data: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        return await self.delete_async(
-            pk=pk, sk=sk, is_purge=False, delete_data=delete_data
-        )
+    async def soft_delete_async(self, pk: str, sk: str, delete_data: dict[str, Any] | None = None) -> dict[str, Any]:
+        return await self.delete_async(pk=pk, sk=sk, is_purge=False, delete_data=delete_data)
 
-    async def hard_delete_async(self, pk: str, sk: str) -> Dict[str, Any]:
+    async def hard_delete_async(self, pk: str, sk: str) -> dict[str, Any]:
         return await self.delete_async(pk=pk, sk=sk, is_purge=True)
 
     def scan_all_paginated(
         self,
-        filter: Optional[str] = None,
-        select: Union[str, List[str], None] = None,
+        filter: str | None = None,
+        select: str | list[str] | None = None,
         page_size: int = 100,
-        skip_token: Optional[Dict[str, Any]] = None,
+        skip_token: dict[str, Any] | None = None,
         item_only: bool = False,
-    ) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
-        params: Dict[str, Any] = {"ReturnConsumedCapacity": "TOTAL", "Limit": page_size}
+    ) -> dict[str, Any] | list[dict[str, Any]]:
+        params: dict[str, Any] = {"ReturnConsumedCapacity": "TOTAL", "Limit": page_size}
 
         if filter is not None:
             params["FilterExpression"] = self._build_filter_expression(filter)
 
         if select is not None:
             if isinstance(select, str):
-                select_fields = [
-                    field.strip() for field in select.split(",") if field.strip()
-                ]
+                select_fields = [field.strip() for field in select.split(",") if field.strip()]
             else:
                 select_fields = select
             projection_expr, expr_attr_names = build_projection(select_fields)
@@ -873,7 +822,7 @@ class DynamoDb:
         response = self.table.scan(**params)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
 
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "items": response.get("Items", []),
             "count": response.get("Count", 0),
         }
@@ -884,22 +833,20 @@ class DynamoDb:
 
     async def scan_all_paginated_async(
         self,
-        filter: Optional[str] = None,
-        select: Union[str, List[str], None] = None,
+        filter: str | None = None,
+        select: str | list[str] | None = None,
         page_size: int = 100,
-        skip_token: Optional[Dict[str, Any]] = None,
+        skip_token: dict[str, Any] | None = None,
         item_only: bool = False,
-    ) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
-        params: Dict[str, Any] = {"ReturnConsumedCapacity": "TOTAL", "Limit": page_size}
+    ) -> dict[str, Any] | list[dict[str, Any]]:
+        params: dict[str, Any] = {"ReturnConsumedCapacity": "TOTAL", "Limit": page_size}
 
         if filter is not None:
             params["FilterExpression"] = self._build_filter_expression(filter)
 
         if select is not None:
             if isinstance(select, str):
-                select_fields = [
-                    field.strip() for field in select.split(",") if field.strip()
-                ]
+                select_fields = [field.strip() for field in select.split(",") if field.strip()]
             else:
                 select_fields = select
             projection_expr, expr_attr_names = build_projection(select_fields)
@@ -917,7 +864,7 @@ class DynamoDb:
             response = await table.scan(**params)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
 
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "items": response.get("Items", []),
             "count": response.get("Count", 0),
         }

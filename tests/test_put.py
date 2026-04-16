@@ -70,8 +70,6 @@ class TestPutAsync:
 
         with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
             mock_session.return_value.resource.return_value = ctx
-            result = asyncio.run(
-                db.put_async("a", "1#x", {"name": "John"}, item_only=True)
-            )
+            result = asyncio.run(db.put_async("a", "1#x", {"name": "John"}, item_only=True))
 
         assert result == {"pk": "a"}

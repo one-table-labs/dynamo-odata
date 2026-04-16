@@ -1,18 +1,19 @@
 Metadata-Version: 2.4
 Name: dynamo-odata
-Version: 0.1.0
+Version: 0.2.0
 Summary: OData filter and projection helpers for AWS DynamoDB
 Author-email: Robert Smith <robert@rsmith.us>
 License-Expression: MIT
-Project-URL: Homepage, https://github.com/smitrob/dynamo-odata
-Project-URL: Repository, https://github.com/smitrob/dynamo-odata
-Project-URL: Issues, https://github.com/smitrob/dynamo-odata/issues
-Project-URL: Changelog, https://github.com/smitrob/dynamo-odata/blob/main/CHANGELOG.md
+Project-URL: Homepage, https://github.com/one-table-labs/dynamo-odata
+Project-URL: Repository, https://github.com/one-table-labs/dynamo-odata
+Project-URL: Issues, https://github.com/one-table-labs/dynamo-odata/issues
+Project-URL: Changelog, https://github.com/one-table-labs/dynamo-odata/blob/main/CHANGELOG.md
 Keywords: dynamodb,odata,boto3,aws,projection,filter
 Classifier: Programming Language :: Python :: 3
 Classifier: Programming Language :: Python :: 3.10
 Classifier: Programming Language :: Python :: 3.11
 Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
 Classifier: Framework :: AsyncIO
 Classifier: Topic :: Database
 Requires-Python: >=3.10
@@ -30,6 +31,8 @@ Provides-Extra: dev
 Requires-Dist: pytest>=8.0; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.23; extra == "dev"
 Requires-Dist: ruff>=0.6; extra == "dev"
+Requires-Dist: pre-commit>=3.7; extra == "dev"
+Requires-Dist: mypy>=1.11; extra == "dev"
 Dynamic: license-file
 
 # dynamo-odata
@@ -154,6 +157,101 @@ await db.soft_delete_async(pk="user::tenant1", sk="1#user123")
 # Async pagination
 async for page in db.scan_all_paginated_async(pk="user::tenant1", page_size=50):
     print(f"Got {len(page)} items")
+```
+
+### Key Schema Configuration
+
+The default key attribute names are lowercase `pk` and `sk`. For projects that use uppercase
+attributes such as `PK` and `SK`, pass a schema preset when constructing the client:
+
+```python
+from dynamo_odata import DynamoDb, UPPERCASE_KEY_SCHEMA
+
+db = DynamoDb(
+    table_name="main-table",
+    region="us-east-1",
+    key_schema=UPPERCASE_KEY_SCHEMA,
+)
+
+item = db.get(pk="TENANT#tenant1", sk="1#USER#123", item_only=True)
+```
+
+You can also define a custom schema if your table uses different key names or separators:
+
+```python
+from dynamo_odata import DynamoDb, KeySchema
+
+custom_schema = KeySchema(
+    pk_name="PK",
+    sk_name="SK",
+    pk_separator="::",
+    sk_separator="#",
+)
+
+db = DynamoDb(table_name="custom-table", key_schema=custom_schema)
+```
+
+### Guardrails For API Usage
+
+For API-facing workloads, you can opt into partition-key validation and filter-policy
+validation so callers cannot query unexpected partitions or use unrestricted filters.
+
+```python
+from dynamo_odata import DynamoDb, FilterPolicy, PartitionKeyGuard, UPPERCASE_KEY_SCHEMA
+
+db = DynamoDb(
+    table_name="main-table",
+    key_schema=UPPERCASE_KEY_SCHEMA,
+    partition_key_guard=PartitionKeyGuard(("TENANT#",)),
+    filter_policy=FilterPolicy(
+        allowed_fields=frozenset({"status", "specialty", "lsis3"}),
+        allowed_comparators=frozenset({"eq", "ne", "gt", "ge", "lt", "le"}),
+        allowed_functions=frozenset({"contains", "startswith", "tolower"}),
+        max_predicates=4,
+        max_depth=6,
+    ),
+)
+
+# Allowed
+items = db.get_all("TENANT#tenant1", filter="status eq 'active'", item_only=True)
+
+# Rejected before query execution
+# db.get_all("DISEASE#123", filter="contains(notes, 'x')", item_only=True)
+```
+
+### Regulated Environment Profile Helpers
+
+For API layers that need repeatable controls, use the optional regulated profile helpers:
+
+These helpers provide policy primitives only. PHI/PII identification and enforcement
+rules remain the responsibility of the consuming application.
+
+```python
+from dynamo_odata import (
+    apply_response_allowlist,
+    apply_response_field_policy,
+    build_regulated_profile,
+    validate_regulated_query,
+)
+
+profile = build_regulated_profile(
+    partition_prefixes=("TENANT#",),
+    allowed_filter_fields=frozenset({"status", "name"}),
+    max_page_size=50,
+)
+
+normalized_limit = validate_regulated_query(
+    profile,
+    partition_key="TENANT#tenant1",
+    filter_text="status eq 'active'",
+    limit=25,
+)
+
+items = [
+    {"PK": "TENANT#tenant1", "SK": "1#USER#1", "name": "Ada", "status": "active"},
+]
+safe_items = apply_response_field_policy(items, profile.forbidden_response_fields)
+public_items = apply_response_allowlist(safe_items, frozenset({"name", "status"}))
 ```
 
 ### Building Filters and Projections
@@ -323,9 +421,9 @@ deleted_items = db.get_all(
 ```python
 db = DynamoDb(
     table_name="users",           # Required
-    region="us-west-2",           # Optional, defaults to AWS_DEFAULT_REGION
-    active_prefix="1#",           # Optional, for single-table pattern
-    inactive_prefix="0#",         # Optional
+    region="us-west-2",           # Optional, defaults to us-west-2
+    pk_separator="::",            # Optional, default partition key separator
+    sk_separator="#",             # Optional, default sort key status separator
 )
 ```
 
@@ -348,6 +446,16 @@ db = DynamoDb(
 |----------|------|---------|-------|
 | `build_filter(expr)` | OData filter string | ConditionBase | Parse filter expression |
 | `build_projection(fields)` | list[str] | (expr, attr_names_dict) | Build projection + name map |
+
+**Key Helpers (DynamoDb methods):**
+
+| Method | Args | Returns | Notes |
+|--------|------|---------|-------|
+| `build_pk` | `*parts` | str | Joins key parts with `pk_separator` |
+| `build_active_sk` | `value` | str | Ensures active SK prefix (`1#` by default) |
+| `build_inactive_sk` | `value` | str | Ensures inactive SK prefix (`0#` by default) |
+| `is_active_sk` | `value` | bool | Checks active prefix |
+| `is_inactive_sk` | `value` | bool | Checks inactive prefix |
 
 ---
 

@@ -1,8 +1,6 @@
 import datetime as dt
 import re
 from dataclasses import dataclass, field
-from typing import List as ListType
-from typing import Optional, Tuple
 from uuid import UUID
 
 from dateutil.parser import isoparse
@@ -18,7 +16,7 @@ class _Node:
 @dataclass(frozen=True)
 class Identifier(_Node):
     name: str
-    namespace: Tuple[str, ...] = field(default_factory=tuple)
+    namespace: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -32,11 +30,9 @@ class Attribute(_Node):
 ###############################################################################
 @dataclass(frozen=True)
 class _Literal(_Node):
-    pass
-
     @property
     def py_val(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 @dataclass(frozen=True)
@@ -128,9 +124,7 @@ class Duration(_Literal):
 
     def unpack(
         self,
-    ) -> Tuple[
-        Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]
-    ]:
+    ) -> tuple[str | None, str | None, str | None, str | None, str | None]:
         """
         Returns:
             ``(sign, days, hours, minutes, seconds)``
@@ -161,7 +155,7 @@ class GUID(_Literal):
 
 @dataclass(frozen=True)
 class List(_Literal):
-    val: ListType[_Literal]
+    val: list[_Literal]
 
     @property
     def py_val(self) -> list:
@@ -334,14 +328,12 @@ class UnaryOp(_Node):
 @dataclass(frozen=True)
 class Call(_Node):
     func: Identifier
-    args: ListType[_Node]
+    args: list[_Node]
 
 
 @dataclass(frozen=True)
 class Exists(_Node):
     pass
-    # func: Function
-    # args: ListType[_Node]
 
 
 @dataclass(frozen=True)
@@ -377,4 +369,4 @@ class Lambda(_Node):
 class CollectionLambda(_Node):
     owner: _Node
     operator: _CollectionOperator
-    lambda_: Optional[Lambda]
+    lambda_: Lambda | None

@@ -1,6 +1,5 @@
 import logging
 import operator
-from typing import Optional, Tuple, Type, Union
 
 from . import ast
 from . import exceptions as ex
@@ -8,9 +7,7 @@ from . import exceptions as ex
 log = logging.getLogger(__name__)
 
 
-def typecheck(
-    node: ast._Node, expected_type: Union[Type, Tuple[Type, ...]], field_name: str
-) -> None:
+def typecheck(node: ast._Node, expected_type: type | tuple[type, ...], field_name: str) -> None:
     """
     Checks that the inferred type of ``node`` is (one) of ``expected_type``, and
     raises :class:`ArgumentTypeException` if not.
@@ -26,15 +23,11 @@ def typecheck(
     actual_type = infer_type(node)
     compare = operator.contains if isinstance(expected_type, tuple) else operator.eq
     if actual_type and not compare(expected_type, actual_type):
-        allowed = (
-            [t.__name__ for t in expected_type]
-            if isinstance(expected_type, tuple)
-            else expected_type.__name__
-        )
+        allowed = [t.__name__ for t in expected_type] if isinstance(expected_type, tuple) else expected_type.__name__
         raise ex.ArgumentTypeException(field_name, str(allowed), actual_type.__name__)
 
 
-def infer_type(node: ast._Node) -> Optional[Type[ast._Node]]:
+def infer_type(node: ast._Node) -> type[ast._Node] | None:
     """
     Tries to infer the type of ``node``.
 
@@ -63,7 +56,7 @@ def infer_type(node: ast._Node) -> Optional[Type[ast._Node]]:
     return None
 
 
-def infer_return_type(node: ast.Call) -> Optional[Type[ast._Node]]:
+def infer_return_type(node: ast.Call) -> type[ast._Node] | None:
     """
     Tries to infer the type of a function call ``node``.
 
