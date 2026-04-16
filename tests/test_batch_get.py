@@ -54,7 +54,9 @@ class TestBatchGetSync:
 
         db.batch_get("pk::t1", ["abc", "1#xyz", "2#old"], item_only=True)
 
-        call_keys = db.db.batch_get_item.call_args[1]["RequestItems"]["table_dev"]["Keys"]
+        call_keys = db.db.batch_get_item.call_args[1]["RequestItems"]["table_dev"][
+            "Keys"
+        ]
         assert {"pk": "pk::t1", "sk": "1#abc"} in call_keys
         assert {"pk": "pk::t1", "sk": "1#xyz"} in call_keys
         assert {"pk": "pk::t1", "sk": "2#old"} in call_keys
@@ -65,7 +67,9 @@ class TestBatchGetSync:
 
         db.batch_get("pk::t1", ["abc", "1|xyz", "2|old"], item_only=True)
 
-        call_keys = db.db.batch_get_item.call_args[1]["RequestItems"]["table_dev"]["Keys"]
+        call_keys = db.db.batch_get_item.call_args[1]["RequestItems"]["table_dev"][
+            "Keys"
+        ]
         assert {"pk": "pk::t1", "sk": "1|abc"} in call_keys
         assert {"pk": "pk::t1", "sk": "1|xyz"} in call_keys
         assert {"pk": "pk::t1", "sk": "2|old"} in call_keys
@@ -73,7 +77,9 @@ class TestBatchGetSync:
     def test_single_chunk_under_100(self):
         """Fewer than 100 keys: exactly one batch_get_item call."""
         db = _make_db()
-        items = [{"pk": "pk::t1", "sk": f"1#item{i}", "name": f"n{i}"} for i in range(10)]
+        items = [
+            {"pk": "pk::t1", "sk": f"1#item{i}", "name": f"n{i}"} for i in range(10)
+        ]
         db.db.batch_get_item.return_value = _batch_response(items)
 
         result = db.batch_get("pk::t1", [f"item{i}" for i in range(10)], item_only=True)
@@ -92,14 +98,20 @@ class TestBatchGetSync:
 
         db.db.batch_get_item.side_effect = side_effect
 
-        result = db.batch_get("pk::t1", [f"item{i}" for i in range(150)], item_only=True)
+        result = db.batch_get(
+            "pk::t1", [f"item{i}" for i in range(150)], item_only=True
+        )
 
         assert db.db.batch_get_item.call_count == 2
         # First call: 100 keys
-        first_call_keys = db.db.batch_get_item.call_args_list[0][1]["RequestItems"]["table_dev"]["Keys"]
+        first_call_keys = db.db.batch_get_item.call_args_list[0][1]["RequestItems"][
+            "table_dev"
+        ]["Keys"]
         assert len(first_call_keys) == 100
         # Second call: 50 keys
-        second_call_keys = db.db.batch_get_item.call_args_list[1][1]["RequestItems"]["table_dev"]["Keys"]
+        second_call_keys = db.db.batch_get_item.call_args_list[1][1]["RequestItems"][
+            "table_dev"
+        ]["Keys"]
         assert len(second_call_keys) == 50
         assert len(result) == 150
 
@@ -119,6 +131,7 @@ class TestBatchGetSync:
                     [{"pk": "pk::t1", "sk": "1#item0"}],
                     unprocessed=[unprocessed_key],
                 )
+
             # Retry: return the previously unprocessed item
             return _batch_response([{"pk": "pk::t1", "sk": "1#item1"}])
 
@@ -189,11 +202,17 @@ class TestBatchGetAsync:
     def test_single_chunk_under_100(self):
         db = _make_db()
         items = [{"pk": "pk::t1", "sk": f"1#item{i}"} for i in range(5)]
-        ctx, mock_resource = self._make_mock_resource_ctx(return_value=_batch_response(items))
+        ctx, mock_resource = self._make_mock_resource_ctx(
+            return_value=_batch_response(items)
+        )
 
         with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
             mock_session.return_value.resource.return_value = ctx
-            result = asyncio.run(db.batch_get_async("pk::t1", [f"item{i}" for i in range(5)], item_only=True))
+            result = asyncio.run(
+                db.batch_get_async(
+                    "pk::t1", [f"item{i}" for i in range(5)], item_only=True
+                )
+            )
 
         assert mock_resource.batch_get_item.call_count == 1
         assert len(result) == 5
@@ -210,7 +229,11 @@ class TestBatchGetAsync:
 
         with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
             mock_session.return_value.resource.return_value = ctx
-            result = asyncio.run(db.batch_get_async("pk::t1", [f"item{i}" for i in range(150)], item_only=True))
+            result = asyncio.run(
+                db.batch_get_async(
+                    "pk::t1", [f"item{i}" for i in range(150)], item_only=True
+                )
+            )
 
         assert mock_resource.batch_get_item.call_count == 2
         assert len(result) == 150
@@ -233,7 +256,9 @@ class TestBatchGetAsync:
 
         with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
             mock_session.return_value.resource.return_value = ctx
-            result = asyncio.run(db.batch_get_async("pk::t1", ["item0", "item1"], item_only=True))
+            result = asyncio.run(
+                db.batch_get_async("pk::t1", ["item0", "item1"], item_only=True)
+            )
 
         assert call_count == 2
         sks = [item["sk"] for item in result]
@@ -247,7 +272,9 @@ class TestBatchGetAsync:
 
         with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
             mock_session.return_value.resource.return_value = ctx
-            result = asyncio.run(db.batch_get_async("pk::t1", ["item0"], item_only=False))
+            result = asyncio.run(
+                db.batch_get_async("pk::t1", ["item0"], item_only=False)
+            )
 
         assert "Responses" in result
         assert result["Responses"]["table_dev"] == items

@@ -21,7 +21,9 @@ class AstToDynamoVisitor(visitor.NodeVisitor):
     def visit_Identifier(self, node: ast.Identifier) -> str:
         ":meta private:"
         # Reconstruct full dotted path (e.g. item_information.created.create_date)
-        full_name = ".".join((*node.namespace, node.name)) if node.namespace else node.name
+        full_name = (
+            ".".join((*node.namespace, node.name)) if node.namespace else node.name
+        )
         attr_name = f'"{full_name}"'
 
         if self.table_alias:
@@ -194,7 +196,9 @@ class AstToDynamoVisitor(visitor.NodeVisitor):
         # and would raise an AttributeError during eval().
         if isinstance(node.right, ast.Null):
             if isinstance(node.comparator, ast.Eq):
-                return f"(Attr({left}).not_exists() | Attr({left}).attribute_type('NULL'))"
+                return (
+                    f"(Attr({left}).not_exists() | Attr({left}).attribute_type('NULL'))"
+                )
             if isinstance(node.comparator, ast.NotEq):
                 return f"(Attr({left}).exists() & ~Attr({left}).attribute_type('NULL'))"
 
@@ -298,7 +302,9 @@ class AstToDynamoVisitor(visitor.NodeVisitor):
     def func_endswith(self, *args: ast._Node) -> str:
         ":meta private:"
         # DynamoDB FilterExpression has no ends-with / suffix-match operation.
-        raise exceptions.UnsupportedFunctionException("endswith is not supported by DynamoDB FilterExpression")
+        raise exceptions.UnsupportedFunctionException(
+            "endswith is not supported by DynamoDB FilterExpression"
+        )
 
     def func_indexof(self, *args: ast._Node) -> str:
         ":meta private:"

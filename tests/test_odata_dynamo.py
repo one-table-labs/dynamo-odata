@@ -45,7 +45,8 @@ def build(filter_str: str):
     expr_str = visitor.visit(ast_tree)
     condition = eval(expr_str, _EVAL_CTX)  # noqa: S307 – intentional, mirrors database.py
     assert isinstance(condition, ConditionBase), (
-        f"Expected ConditionBase, got {type(condition).__name__} for: {filter_str!r}\nGenerated expression: {expr_str}"
+        f"Expected ConditionBase, got {type(condition).__name__} for: {filter_str!r}\n"
+        f"Generated expression: {expr_str}"
     )
     return expr_str, condition
 
@@ -364,11 +365,15 @@ class TestCompoundQueries:
         assert op(cond) == "AND"
 
     def test_multi_rule_group_filter(self):
-        _, cond = build("status eq 'active' and role_id ne null and contains(name, 'Smith')")
+        _, cond = build(
+            "status eq 'active' and role_id ne null and contains(name, 'Smith')"
+        )
         assert op(cond) == "AND"
 
     def test_complex_or_and_mix(self):
-        _, cond = build("(startswith(first_name, 'A') or startswith(last_name, 'B')) and active eq true")
+        _, cond = build(
+            "(startswith(first_name, 'A') or startswith(last_name, 'B')) and active eq true"
+        )
         assert op(cond) == "AND"
         assert op(vals(cond)[0]) == "OR"
 
