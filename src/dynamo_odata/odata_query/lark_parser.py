@@ -234,16 +234,10 @@ class ODataTransformer(Transformer):
 
         n_args_given = len(args)
         if isinstance(n_args_exp, int) and n_args_given != n_args_exp:
-            raise exceptions.ArgumentCountException(
-                func_name, n_args_exp, n_args_exp, n_args_given
-            )
+            raise exceptions.ArgumentCountException(func_name, n_args_exp, n_args_exp, n_args_given)
 
-        if isinstance(n_args_exp, tuple) and (
-            n_args_given < n_args_exp[0] or n_args_given > n_args_exp[1]
-        ):
-            raise exceptions.ArgumentCountException(
-                func_name, n_args_exp[0], n_args_exp[1], n_args_given
-            )
+        if isinstance(n_args_exp, tuple) and (n_args_given < n_args_exp[0] or n_args_given > n_args_exp[1]):
+            raise exceptions.ArgumentCountException(func_name, n_args_exp[0], n_args_exp[1], n_args_given)
 
         return ast.Call(func, args)
 

@@ -21,18 +21,14 @@ class PartitionKeyGuard:
     def __post_init__(self) -> None:
         prefixes = tuple(prefix for prefix in self.allowed_prefixes if prefix)
         if not prefixes:
-            raise ValueError(
-                "allowed_prefixes must contain at least one non-empty prefix"
-            )
+            raise ValueError("allowed_prefixes must contain at least one non-empty prefix")
         object.__setattr__(self, "allowed_prefixes", prefixes)
 
     def validate(self, partition_key: str) -> None:
         if any(partition_key.startswith(prefix) for prefix in self.allowed_prefixes):
             return
         allowed = ", ".join(self.allowed_prefixes)
-        raise PartitionKeyValidationError(
-            f"Partition key {partition_key!r} must start with one of: {allowed}"
-        )
+        raise PartitionKeyValidationError(f"Partition key {partition_key!r} must start with one of: {allowed}")
 
 
 @dataclass(frozen=True)
@@ -72,19 +68,14 @@ class _FilterPolicyValidator:
 
     def validate(self, node: ast._Node) -> None:
         self._walk(node, depth=1)
-        if (
-            self.policy.max_predicates is not None
-            and self.predicate_count > self.policy.max_predicates
-        ):
+        if self.policy.max_predicates is not None and self.predicate_count > self.policy.max_predicates:
             raise FilterPolicyViolationError(
                 f"Filter contains {self.predicate_count} predicates; max is {self.policy.max_predicates}"
             )
 
     def _walk(self, node: ast._Node, depth: int) -> None:
         if self.policy.max_depth is not None and depth > self.policy.max_depth:
-            raise FilterPolicyViolationError(
-                f"Filter nesting depth {depth} exceeds max depth {self.policy.max_depth}"
-            )
+            raise FilterPolicyViolationError(f"Filter nesting depth {depth} exceeds max depth {self.policy.max_depth}")
 
         checker = getattr(self, f"_check_{node.__class__.__name__}", None)
         if checker is not None:
@@ -139,24 +130,18 @@ class _FilterPolicyValidator:
             return
         if comparator_name in self.policy.allowed_comparators:
             return
-        raise FilterPolicyViolationError(
-            f"Comparator {comparator_name!r} is not allowed"
-        )
+        raise FilterPolicyViolationError(f"Comparator {comparator_name!r} is not allowed")
 
     def _field_name(self, node: ast._Node) -> str:
         if isinstance(node, ast.Identifier):
-            return (
-                ".".join((*node.namespace, node.name)) if node.namespace else node.name
-            )
+            return ".".join((*node.namespace, node.name)) if node.namespace else node.name
         if isinstance(node, ast.Attribute):
             return f"{self._field_name(node.owner)}.{node.attr}"
         if isinstance(node, ast.Call) and node.func.name.lower() == "tolower":
             if not node.args:
                 raise FilterPolicyViolationError("tolower requires a field argument")
             return self._field_name(node.args[0])
-        raise FilterPolicyViolationError(
-            f"Unsupported field reference type: {type(node).__name__}"
-        )
+        raise FilterPolicyViolationError(f"Unsupported field reference type: {type(node).__name__}")
 
     @staticmethod
     def _comparator_name(node: ast._Node) -> str:

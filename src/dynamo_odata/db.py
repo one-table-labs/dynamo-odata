@@ -66,12 +66,7 @@ class DynamoDb:
 
     @staticmethod
     def _now_iso() -> str:
-        return (
-            datetime.now(timezone.utc)
-            .replace(microsecond=0)
-            .isoformat()
-            .replace("+00:00", "Z")
-        )
+        return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
     def add_consumed_capacity(self, consumed_capacity: Any) -> None:
         if not consumed_capacity:
@@ -141,9 +136,7 @@ class DynamoDb:
     @staticmethod
     def _convert_to_decimal(value: Any) -> Any:
         if isinstance(value, dict):
-            return {
-                key: DynamoDb._convert_to_decimal(item) for key, item in value.items()
-            }
+            return {key: DynamoDb._convert_to_decimal(item) for key, item in value.items()}
         if isinstance(value, list):
             return [DynamoDb._convert_to_decimal(item) for item in value]
         if isinstance(value, (int, float)):
@@ -166,9 +159,7 @@ class DynamoDb:
         self._validate_partition_key(pk)
         effective_fields = fields or select
         if isinstance(effective_fields, str):
-            effective_fields = [
-                field.strip() for field in effective_fields.split(",") if field.strip()
-            ]
+            effective_fields = [field.strip() for field in effective_fields.split(",") if field.strip()]
 
         params: dict[str, Any] = {
             "Key": self._key_dict(pk, sk),
@@ -219,19 +210,19 @@ class DynamoDb:
             params["IndexName"] = lsi
 
         if sk_begins_with is not None:
-            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(
-                pk
-            ) & Key(self.sort_key_name).begins_with(sk_begins_with)
+            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk) & Key(
+                self.sort_key_name
+            ).begins_with(sk_begins_with)
         elif active is None:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk)
         elif active is True and pk != "tenants":
-            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(
-                pk
-            ) & Key(self.sort_key_name).begins_with(self.ACTIVE_PREFIX)
+            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk) & Key(
+                self.sort_key_name
+            ).begins_with(self.ACTIVE_PREFIX)
         elif active is False:
-            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(
-                pk
-            ) & Key(self.sort_key_name).begins_with(self.INACTIVE_PREFIX)
+            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk) & Key(
+                self.sort_key_name
+            ).begins_with(self.INACTIVE_PREFIX)
         else:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk)
 
@@ -239,9 +230,7 @@ class DynamoDb:
             params["FilterExpression"] = self._build_filter_expression(filter)
 
         if select is not None:
-            select_fields = [
-                field.strip() for field in select.split(",") if field.strip()
-            ]
+            select_fields = [field.strip() for field in select.split(",") if field.strip()]
             projection_expr, expr_attr_names = build_projection(select_fields)
             if projection_expr:
                 params["ProjectionExpression"] = projection_expr
@@ -353,9 +342,7 @@ class DynamoDb:
                     pending_keys[:batch_chunk],
                     pending_keys[batch_chunk:],
                 )
-                request_items: dict[str, Any] = {
-                    table_name: {**table_spec, "Keys": chunk}
-                }
+                request_items: dict[str, Any] = {table_name: {**table_spec, "Keys": chunk}}
                 response = await resource.batch_get_item(
                     RequestItems=request_items,
                     ReturnConsumedCapacity="TOTAL",
@@ -384,9 +371,7 @@ class DynamoDb:
         self._validate_partition_key(pk)
         effective_fields = fields or select
         if isinstance(effective_fields, str):
-            effective_fields = [
-                field.strip() for field in effective_fields.split(",") if field.strip()
-            ]
+            effective_fields = [field.strip() for field in effective_fields.split(",") if field.strip()]
 
         params: dict[str, Any] = {
             "Key": self._key_dict(pk, sk),
@@ -440,19 +425,19 @@ class DynamoDb:
             params["IndexName"] = lsi
 
         if sk_begins_with is not None:
-            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(
-                pk
-            ) & Key(self.sort_key_name).begins_with(sk_begins_with)
+            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk) & Key(
+                self.sort_key_name
+            ).begins_with(sk_begins_with)
         elif active is None:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk)
         elif active is True and pk != "tenants":
-            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(
-                pk
-            ) & Key(self.sort_key_name).begins_with(self.ACTIVE_PREFIX)
+            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk) & Key(
+                self.sort_key_name
+            ).begins_with(self.ACTIVE_PREFIX)
         elif active is False:
-            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(
-                pk
-            ) & Key(self.sort_key_name).begins_with(self.INACTIVE_PREFIX)
+            params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk) & Key(
+                self.sort_key_name
+            ).begins_with(self.INACTIVE_PREFIX)
         else:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk)
 
@@ -460,9 +445,7 @@ class DynamoDb:
             params["FilterExpression"] = self._build_filter_expression(filter)
 
         if select is not None:
-            select_fields = [
-                field.strip() for field in select.split(",") if field.strip()
-            ]
+            select_fields = [field.strip() for field in select.split(",") if field.strip()]
             projection_expr, expr_attr_names = build_projection(select_fields)
             if projection_expr:
                 params["ProjectionExpression"] = projection_expr
@@ -507,11 +490,7 @@ class DynamoDb:
     ) -> dict[str, Any] | None:
         self._validate_partition_key(pk)
         del unique_fields
-        append_list = (
-            []
-            if append_list is None
-            else [item for item in append_list if item in data]
-        )
+        append_list = [] if append_list is None else [item for item in append_list if item in data]
         append_dict = [] if append_dict is None else append_dict
 
         data = self._strip_key_attributes(self._convert_to_decimal(dict(data)))
@@ -528,24 +507,16 @@ class DynamoDb:
                 update_expression_list.append(f"#{item} = if_not_exists(#{item}, :now)")
                 expression_attribute_values[":now"] = self._now_iso()
             elif item.endswith("__inc"):
-                update_expression_list.append(
-                    f"#{item} = if_not_exists(#{item}, :start) + :{item}"
-                )
+                update_expression_list.append(f"#{item} = if_not_exists(#{item}, :start) + :{item}")
                 expression_attribute_values[":start"] = 0
                 expression_attribute_values[f":{item}"] = value
             elif item in append_list:
                 list_date = data.get("list_date", self._now_iso())
-                update_expression_list.append(
-                    f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)"
-                )
+                update_expression_list.append(f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)")
                 expression_attribute_values[":empty_list"] = []
-                expression_attribute_values[":va"] = [
-                    {item: value, f"{item}_date": list_date}
-                ]
+                expression_attribute_values[":va"] = [{item: value, f"{item}_date": list_date}]
             elif item in append_dict:
-                update_expression_list.append(
-                    f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)"
-                )
+                update_expression_list.append(f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)")
                 expression_attribute_values[":empty_list"] = []
                 expression_attribute_values[":va"] = [data[item]]
             else:
@@ -580,11 +551,7 @@ class DynamoDb:
     ) -> dict[str, Any] | None:
         self._validate_partition_key(pk)
         del unique_fields
-        append_list = (
-            []
-            if append_list is None
-            else [item for item in append_list if item in data]
-        )
+        append_list = [] if append_list is None else [item for item in append_list if item in data]
         append_dict = [] if append_dict is None else append_dict
 
         data = self._strip_key_attributes(self._convert_to_decimal(dict(data)))
@@ -601,24 +568,16 @@ class DynamoDb:
                 update_expression_list.append(f"#{item} = if_not_exists(#{item}, :now)")
                 expression_attribute_values[":now"] = self._now_iso()
             elif item.endswith("__inc"):
-                update_expression_list.append(
-                    f"#{item} = if_not_exists(#{item}, :start) + :{item}"
-                )
+                update_expression_list.append(f"#{item} = if_not_exists(#{item}, :start) + :{item}")
                 expression_attribute_values[":start"] = 0
                 expression_attribute_values[f":{item}"] = value
             elif item in append_list:
                 list_date = data.get("list_date", self._now_iso())
-                update_expression_list.append(
-                    f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)"
-                )
+                update_expression_list.append(f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)")
                 expression_attribute_values[":empty_list"] = []
-                expression_attribute_values[":va"] = [
-                    {item: value, f"{item}_date": list_date}
-                ]
+                expression_attribute_values[":va"] = [{item: value, f"{item}_date": list_date}]
             elif item in append_dict:
-                update_expression_list.append(
-                    f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)"
-                )
+                update_expression_list.append(f"#{item} = list_append(if_not_exists(#{item}, :empty_list), :va)")
                 expression_attribute_values[":empty_list"] = []
                 expression_attribute_values[":va"] = [data[item]]
             else:
@@ -787,9 +746,7 @@ class DynamoDb:
 
         session = _get_aioboto3_session()
         if is_purge:
-            async with session.resource(
-                "dynamodb", region_name=self.region
-            ) as resource:
+            async with session.resource("dynamodb", region_name=self.region) as resource:
                 table = await resource.Table(self.table.name)
                 response = await table.delete_item(
                     Key=self._key_dict(pk, sk),
@@ -823,20 +780,14 @@ class DynamoDb:
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
         return response
 
-    def soft_delete(
-        self, pk: str, sk: str, delete_data: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    def soft_delete(self, pk: str, sk: str, delete_data: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.delete(pk=pk, sk=sk, is_purge=False, delete_data=delete_data)
 
     def hard_delete(self, pk: str, sk: str) -> dict[str, Any]:
         return self.delete(pk=pk, sk=sk, is_purge=True)
 
-    async def soft_delete_async(
-        self, pk: str, sk: str, delete_data: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        return await self.delete_async(
-            pk=pk, sk=sk, is_purge=False, delete_data=delete_data
-        )
+    async def soft_delete_async(self, pk: str, sk: str, delete_data: dict[str, Any] | None = None) -> dict[str, Any]:
+        return await self.delete_async(pk=pk, sk=sk, is_purge=False, delete_data=delete_data)
 
     async def hard_delete_async(self, pk: str, sk: str) -> dict[str, Any]:
         return await self.delete_async(pk=pk, sk=sk, is_purge=True)
@@ -856,9 +807,7 @@ class DynamoDb:
 
         if select is not None:
             if isinstance(select, str):
-                select_fields = [
-                    field.strip() for field in select.split(",") if field.strip()
-                ]
+                select_fields = [field.strip() for field in select.split(",") if field.strip()]
             else:
                 select_fields = select
             projection_expr, expr_attr_names = build_projection(select_fields)
@@ -897,9 +846,7 @@ class DynamoDb:
 
         if select is not None:
             if isinstance(select, str):
-                select_fields = [
-                    field.strip() for field in select.split(",") if field.strip()
-                ]
+                select_fields = [field.strip() for field in select.split(",") if field.strip()]
             else:
                 select_fields = select
             projection_expr, expr_attr_names = build_projection(select_fields)
