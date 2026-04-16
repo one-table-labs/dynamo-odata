@@ -279,6 +279,34 @@ build_filter("deleted not_exists")       # attribute missing
 build_filter("status eq null")           # null checks (special handling in DynamoDB)
 ```
 
+### Grouping with Parentheses
+
+Parentheses control evaluation order and are essential when mixing `and` / `or`.
+Without them, `and` binds more tightly than `or` — the same precedence rules as
+Python and SQL.
+
+```python
+# Without parentheses: `and` binds tighter than `or`
+# Equivalent to: status eq 'active' and (role eq 'admin' or role eq 'mod')? NO —
+# actually: (status eq 'active' and role eq 'admin') or role eq 'mod'
+build_filter("status eq 'active' and role eq 'admin' or role eq 'mod'")
+
+# With parentheses: intent is explicit and correct
+build_filter("status eq 'active' and (role eq 'admin' or role eq 'mod')")
+
+# Multiple groups
+build_filter("(status eq 'active' or status eq 'trial') and (age gt 18 or override eq true)")
+
+# Negating a group
+build_filter("not (status eq 'deleted' or status eq 'banned')")
+
+# Deeply nested
+build_filter("(a eq 1 and (b eq 2 or c eq 3)) or (d eq 4 and e eq 5)")
+```
+
+**Rule of thumb:** any time you combine `and` with `or` in the same expression,
+use parentheses to make the grouping explicit.
+
 ### Unsupported (by design)
 
 These are not supported in DynamoDB OData queries:
