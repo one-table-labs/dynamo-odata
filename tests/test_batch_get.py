@@ -119,6 +119,7 @@ class TestBatchGetSync:
                     [{"pk": "pk::t1", "sk": "1#item0"}],
                     unprocessed=[unprocessed_key],
                 )
+
             # Retry: return the previously unprocessed item
             return _batch_response([{"pk": "pk::t1", "sk": "1#item1"}])
 
