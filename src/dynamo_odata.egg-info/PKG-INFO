@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: dynamo-odata
-Version: 0.2.0
+Version: 0.3.0
 Summary: OData filter and projection helpers for AWS DynamoDB
 Author-email: Robert Smith <robert@rsmith.us>
 License-Expression: MIT

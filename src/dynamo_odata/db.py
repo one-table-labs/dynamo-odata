@@ -792,6 +792,287 @@ class DynamoDb:
     async def hard_delete_async(self, pk: str, sk: str) -> dict[str, Any]:
         return await self.delete_async(pk=pk, sk=sk, is_purge=True)
 
+    def restore(self, pk: str, sk_body: str, restore_data: dict[str, Any] | None = None) -> dict[str, Any]:
+        """
+        Restore a soft-deleted item: atomically swaps SK from 0# → 1#.
+
+        Sets ``active=True`` and removes ``deleted_at`` / ``deleted_by`` / ``deleted_reason``.
+        Optionally merges ``restore_data`` fields onto the restored item.
+
+        Args:
+            pk: Partition key of the item.
+            sk_body: The SK body *without* the status prefix, e.g. ``"USER#abc"``.
+                     If you pass a full inactive SK (``"0#USER#abc"``), it is used as-is.
+            restore_data: Optional extra fields to set on the restored item.
+
+        Returns:
+            The DynamoDB response from the final delete_item call on the old inactive record.
+
+        Raises:
+            ValueError: If the inactive item does not exist.
+        """
+        self._validate_partition_key(pk)
+        inactive_sk = self.build_inactive_sk(sk_body)
+        item = self.get(pk=pk, sk=inactive_sk, item_only=True)
+        if item is None:
+            raise ValueError(f"No inactive item found at PK={pk!r} SK={inactive_sk!r}")
+
+        item = dict(item)
+        item[self.sort_key_name] = self.build_active_sk(sk_body)
+        item["active"] = True
+        item.pop("deleted_at", None)
+        item.pop("deleted_by", None)
+        item.pop("deleted_reason", None)
+        item["restored_at"] = self._now_iso()
+        if restore_data:
+            for k, v in restore_data.items():
+                if k not in (self.partition_key_name, self.sort_key_name):
+                    item[k] = v
+
+        self.transact_write(
+            [
+                {"Delete": {"Key": self._key_dict(pk, inactive_sk)}},
+                {"Put": {"Item": self._convert_to_decimal(item)}},
+            ]
+        )
+        return item
+
+    async def restore_async(self, pk: str, sk_body: str, restore_data: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Async version of :meth:`restore`."""
+        self._validate_partition_key(pk)
+        inactive_sk = self.build_inactive_sk(sk_body)
+        item = await self.get_async(pk=pk, sk=inactive_sk, item_only=True)
+        if item is None:
+            raise ValueError(f"No inactive item found at PK={pk!r} SK={inactive_sk!r}")
+
+        item = dict(item)
+        item[self.sort_key_name] = self.build_active_sk(sk_body)
+        item["active"] = True
+        item.pop("deleted_at", None)
+        item.pop("deleted_by", None)
+        item.pop("deleted_reason", None)
+        item["restored_at"] = self._now_iso()
+        if restore_data:
+            for k, v in restore_data.items():
+                if k not in (self.partition_key_name, self.sort_key_name):
+                    item[k] = v
+
+        await self.transact_write_async(
+            [
+                {"Delete": {"Key": self._key_dict(pk, inactive_sk)}},
+                {"Put": {"Item": self._convert_to_decimal(item)}},
+            ]
+        )
+        return item
+
+    def query_gsi(
+        self,
+        index_name: str,
+        pk_attr: str,
+        pk_value: str,
+        sk_attr: str | None = None,
+        sk_value: Any | None = None,
+        sk_begins_with: str | None = None,
+        sk_between: tuple[Any, Any] | None = None,
+        filter_expr: Any | None = None,
+        filter: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        scan_index_forward: bool = True,
+        item_only: bool = False,
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """
+        Query a Global Secondary Index (GSI) by its partition key attribute.
+
+        Args:
+            index_name: The GSI index name, e.g. ``"tenant-slug-index"``.
+            pk_attr: The GSI partition key attribute name, e.g. ``"tenantSlug"``.
+            pk_value: The value to match on the GSI partition key.
+            sk_attr: Optional GSI sort key attribute name.
+            sk_value: Exact match on the GSI sort key.
+            sk_begins_with: ``begins_with`` condition on the GSI sort key.
+            sk_between: ``(low, high)`` range on the GSI sort key.
+            filter_expr: A pre-built boto3 ``ConditionBase`` filter.
+            filter: An OData filter string (alternative to ``filter_expr``).
+            limit: Maximum number of items to return.
+            cursor: Base64-encoded pagination cursor from a previous call.
+            scan_index_forward: Sort order (``True`` = ascending).
+            item_only: If ``True``, return ``(items, cursor)``; otherwise same.
+
+        Returns:
+            ``(items, next_cursor)`` — ``next_cursor`` is ``None`` when there are no more pages,
+            otherwise a base64-encoded string to pass as ``cursor`` on the next call.
+        """
+        key_cond: Any = Key(pk_attr).eq(pk_value)
+        if sk_attr is not None:
+            if sk_value is not None:
+                key_cond = key_cond & Key(sk_attr).eq(sk_value)
+            elif sk_begins_with is not None:
+                key_cond = key_cond & Key(sk_attr).begins_with(sk_begins_with)
+            elif sk_between is not None:
+                key_cond = key_cond & Key(sk_attr).between(*sk_between)
+
+        params: dict[str, Any] = {
+            "IndexName": index_name,
+            "KeyConditionExpression": key_cond,
+            "ScanIndexForward": scan_index_forward,
+            "ReturnConsumedCapacity": "TOTAL",
+        }
+        if limit is not None:
+            params["Limit"] = limit
+
+        effective_filter = filter_expr
+        if filter is not None:
+            odata_filter = self._build_filter_expression(filter)
+            effective_filter = odata_filter & filter_expr if filter_expr is not None else odata_filter
+        if effective_filter is not None:
+            params["FilterExpression"] = effective_filter
+
+        if cursor is not None:
+            import base64
+            import json
+
+            params["ExclusiveStartKey"] = json.loads(base64.b64decode(cursor.encode()).decode())
+
+        response = self.table.query(**params)
+        self.add_consumed_capacity(response.get("ConsumedCapacity"))
+        items = response.get("Items", [])
+
+        next_cursor: str | None = None
+        if last_key := response.get("LastEvaluatedKey"):
+            import base64
+            import json
+
+            next_cursor = base64.b64encode(json.dumps(last_key).encode()).decode()
+
+        return items, next_cursor
+
+    async def query_gsi_async(
+        self,
+        index_name: str,
+        pk_attr: str,
+        pk_value: str,
+        sk_attr: str | None = None,
+        sk_value: Any | None = None,
+        sk_begins_with: str | None = None,
+        sk_between: tuple[Any, Any] | None = None,
+        filter_expr: Any | None = None,
+        filter: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        scan_index_forward: bool = True,
+        item_only: bool = False,
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """Async version of :meth:`query_gsi`."""
+        key_cond: Any = Key(pk_attr).eq(pk_value)
+        if sk_attr is not None:
+            if sk_value is not None:
+                key_cond = key_cond & Key(sk_attr).eq(sk_value)
+            elif sk_begins_with is not None:
+                key_cond = key_cond & Key(sk_attr).begins_with(sk_begins_with)
+            elif sk_between is not None:
+                key_cond = key_cond & Key(sk_attr).between(*sk_between)
+
+        params: dict[str, Any] = {
+            "IndexName": index_name,
+            "KeyConditionExpression": key_cond,
+            "ScanIndexForward": scan_index_forward,
+            "ReturnConsumedCapacity": "TOTAL",
+        }
+        if limit is not None:
+            params["Limit"] = limit
+
+        effective_filter = filter_expr
+        if filter is not None:
+            odata_filter = self._build_filter_expression(filter)
+            effective_filter = odata_filter & filter_expr if filter_expr is not None else odata_filter
+        if effective_filter is not None:
+            params["FilterExpression"] = effective_filter
+
+        if cursor is not None:
+            import base64
+            import json
+
+            params["ExclusiveStartKey"] = json.loads(base64.b64decode(cursor.encode()).decode())
+
+        session = _get_aioboto3_session()
+        async with session.resource("dynamodb", region_name=self.region) as resource:
+            table = await resource.Table(self.table.name)
+            response = await table.query(**params)
+        self.add_consumed_capacity(response.get("ConsumedCapacity"))
+        items = response.get("Items", [])
+
+        next_cursor: str | None = None
+        if last_key := response.get("LastEvaluatedKey"):
+            import base64
+            import json
+
+            next_cursor = base64.b64encode(json.dumps(last_key).encode()).decode()
+
+        return items, next_cursor
+
+    def transact_write(self, operations: list[dict[str, Any]]) -> None:
+        """
+        Execute an atomic multi-item write (up to 25 items per DynamoDB limit).
+
+        Each operation is a dict in DynamoDB transact_write format::
+
+            {"Put":    {"Item": {...}}}
+            {"Delete": {"Key": {"PK": ..., "SK": ...}}}
+            {"Update": {"Key": ..., "UpdateExpression": ..., ...}}
+
+        ``TableName`` is injected automatically on every operation.
+
+        Args:
+            operations: List of operation dicts. Max 25 items.
+
+        Raises:
+            ValueError: If ``operations`` is empty or exceeds 25 items.
+        """
+        if not operations:
+            raise ValueError("transact_write requires at least one operation")
+        if len(operations) > 25:
+            raise ValueError(f"transact_write supports up to 25 operations, got {len(operations)}")
+
+        import boto3 as _boto3
+
+        client_kwargs: dict[str, Any] = {"region_name": self.region}
+        # Support local endpoint override (e.g. DynamoDB Local in tests)
+        endpoint_url = getattr(self.table.meta.client.meta, "endpoint_url", None)
+        if endpoint_url:
+            client_kwargs["endpoint_url"] = endpoint_url
+
+        client = _boto3.client("dynamodb", **client_kwargs)
+        table_name = self.table.name
+
+        typed_ops = []
+        for op in operations:
+            typed_op: dict[str, Any] = {}
+            for action, params in op.items():
+                typed_op[action] = {"TableName": table_name, **params}
+            typed_ops.append(typed_op)
+
+        client.transact_write_items(TransactItems=typed_ops)
+
+    async def transact_write_async(self, operations: list[dict[str, Any]]) -> None:
+        """Async version of :meth:`transact_write`."""
+        if not operations:
+            raise ValueError("transact_write requires at least one operation")
+        if len(operations) > 25:
+            raise ValueError(f"transact_write supports up to 25 operations, got {len(operations)}")
+
+        table_name = self.table.name
+        typed_ops = []
+        for op in operations:
+            typed_op: dict[str, Any] = {}
+            for action, params in op.items():
+                typed_op[action] = {"TableName": table_name, **params}
+            typed_ops.append(typed_op)
+
+        session = _get_aioboto3_session()
+        async with session.client("dynamodb", region_name=self.region) as client:
+            await client.transact_write_items(TransactItems=typed_ops)
+
     def scan_all_paginated(
         self,
         filter: str | None = None,

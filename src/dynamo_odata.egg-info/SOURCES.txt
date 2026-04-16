@@ -36,6 +36,7 @@ tests/test_build_filter.py
 tests/test_delete.py
 tests/test_get.py
 tests/test_get_all.py
+tests/test_gsi_transact_restore.py
 tests/test_guardrails.py
 tests/test_key_helpers.py
 tests/test_key_schema_config.py

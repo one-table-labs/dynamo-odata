@@ -4,7 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-04-15
+
+### Added
+
+- `DynamoDb.query_gsi()` / `query_gsi_async()` — query a GSI by its partition key attribute,
+  with optional SK conditions (eq, begins_with, between), OData filter string, limit, and
+  base64 cursor pagination
+- `DynamoDb.transact_write()` / `transact_write_async()` — atomic multi-item write (up to 25
+  operations); injects `TableName` automatically on every operation dict
+- `DynamoDb.restore()` / `restore_async()` — restore a soft-deleted item by atomically swapping
+  its SK from `0#` → `1#`, clearing `deleted_at`/`deleted_by`/`deleted_reason`, and setting
+  `restored_at`; optional `restore_data` dict merged onto the restored item
 
 ---
 
