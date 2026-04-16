@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 
 from .dynamo_filter import build_filter
 from .guardrails import FilterPolicy, PartitionKeyGuard
@@ -602,6 +602,86 @@ class DynamoDb:
         if item_only and "Attributes" in response:
             return response["Attributes"]
         return response
+
+    def put_item(self, pk: str, sk: str, item: dict[str, Any]) -> None:
+        """
+        Unconditional full-item replace (true PUT semantics).
+
+        Replaces the entire item at ``(pk, sk)`` with ``item``.  Unlike
+        :meth:`put`, which uses ``UpdateExpression`` to merge fields, this
+        method issues a raw ``PutItem`` that overwrites every attribute.
+
+        Args:
+            pk: Partition key value.
+            sk: Sort key value.
+            item: Attribute dict to write.  Must not contain the key
+                attributes (``PK`` / ``SK``) — they are injected automatically.
+
+        Raises:
+            ValueError: If ``pk`` fails partition-key validation.
+        """
+        self._validate_partition_key(pk)
+        body = self._convert_to_decimal(dict(item))
+        body = self._strip_key_attributes(body)
+        full_item = {self.partition_key_name: pk, self.sort_key_name: sk, **body}
+        self.table.put_item(Item=full_item, ReturnConsumedCapacity="TOTAL")
+
+    async def put_item_async(self, pk: str, sk: str, item: dict[str, Any]) -> None:
+        """Async version of :meth:`put_item`."""
+        self._validate_partition_key(pk)
+        body = self._convert_to_decimal(dict(item))
+        body = self._strip_key_attributes(body)
+        full_item = {self.partition_key_name: pk, self.sort_key_name: sk, **body}
+        session = _get_aioboto3_session()
+        async with session.resource("dynamodb", region_name=self.region) as resource:
+            table = await resource.Table(self.table.name)
+            await table.put_item(Item=full_item, ReturnConsumedCapacity="TOTAL")
+
+    def create_item(self, pk: str, sk: str, item: dict[str, Any]) -> None:
+        """
+        Conditional write that fails if the item already exists.
+
+        Issues a ``PutItem`` with
+        ``ConditionExpression=Attr(PK).not_exists()`` so the call is
+        atomic and idempotency-safe: if an item with the same ``(pk, sk)``
+        already exists a ``ClientError`` with code
+        ``ConditionalCheckFailedException`` is raised.
+
+        Args:
+            pk: Partition key value.
+            sk: Sort key value.
+            item: Attribute dict to write.  Key attributes are injected
+                automatically.
+
+        Raises:
+            ValueError: If ``pk`` fails partition-key validation.
+            botocore.exceptions.ClientError: With code
+                ``ConditionalCheckFailedException`` if the item exists.
+        """
+        self._validate_partition_key(pk)
+        body = self._convert_to_decimal(dict(item))
+        body = self._strip_key_attributes(body)
+        full_item = {self.partition_key_name: pk, self.sort_key_name: sk, **body}
+        self.table.put_item(
+            Item=full_item,
+            ConditionExpression=Attr(self.partition_key_name).not_exists(),
+            ReturnConsumedCapacity="TOTAL",
+        )
+
+    async def create_item_async(self, pk: str, sk: str, item: dict[str, Any]) -> None:
+        """Async version of :meth:`create_item`."""
+        self._validate_partition_key(pk)
+        body = self._convert_to_decimal(dict(item))
+        body = self._strip_key_attributes(body)
+        full_item = {self.partition_key_name: pk, self.sort_key_name: sk, **body}
+        session = _get_aioboto3_session()
+        async with session.resource("dynamodb", region_name=self.region) as resource:
+            table = await resource.Table(self.table.name)
+            await table.put_item(
+                Item=full_item,
+                ConditionExpression=Attr(self.partition_key_name).not_exists(),
+                ReturnConsumedCapacity="TOTAL",
+            )
 
     def delete(
         self,

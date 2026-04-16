@@ -4,7 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] - 2026-04-15
+## [0.4.0] - 2026-04-15
+
+### Added
+
+- `DynamoDb.put_item(pk, sk, item)` / `put_item_async` — unconditional full-item
+  replace using raw `PutItem` (true PUT semantics, no `UpdateExpression`)
+- `DynamoDb.create_item(pk, sk, item)` / `create_item_async` — conditional write
+  that raises `ConditionalCheckFailedException` if the item already exists;
+  uses `Attr(PK).not_exists()` condition for idempotency-safe entity creation
 
 ### Added
 
