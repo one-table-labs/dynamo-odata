@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from dynamo_odata import DynamoDb, UPPERCASE_KEY_SCHEMA
+from dynamo_odata import UPPERCASE_KEY_SCHEMA, DynamoDb
 
 
 def _make_db() -> DynamoDb:
@@ -49,7 +49,8 @@ class TestUpdateItemSync:
         db.table.update_item.return_value = {"Attributes": {}}
 
         db.update_item(
-            "TENANT#t1#USER", "1#u1",
+            "TENANT#t1#USER",
+            "1#u1",
             {"PK": "should-be-stripped", "SK": "should-be-stripped", "name": "Carol"},
         )
 
@@ -99,9 +100,7 @@ class TestUpdateItemAsync:
 
         with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
             mock_session.return_value.resource.return_value = ctx
-            result = asyncio.run(
-                db.update_item_async("TENANT#t1#USER", "1#u1", {"name": "Alice", "status": "active"})
-            )
+            result = asyncio.run(db.update_item_async("TENANT#t1#USER", "1#u1", {"name": "Alice", "status": "active"}))
 
         assert result == {"name": "Alice", "status": "active"}
 
@@ -118,9 +117,7 @@ class TestUpdateItemAsync:
 
         with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
             mock_session.return_value.resource.return_value = ctx
-            asyncio.run(
-                db.update_item_async("TENANT#t1#USER", "1#u1", {"name": "Bob", "lsis3": "bob"})
-            )
+            asyncio.run(db.update_item_async("TENANT#t1#USER", "1#u1", {"name": "Bob", "lsis3": "bob"}))
 
         assert captured[0]["UpdateExpression"].startswith("SET ")
         assert "#name=:name" in captured[0]["UpdateExpression"]

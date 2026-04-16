@@ -25,11 +25,6 @@ def _make_db() -> DynamoDb:
         return db
 
 
-# ---------------------------------------------------------------------------
-# put_item (sync)
-# ---------------------------------------------------------------------------
-
-
 class TestPutItem:
     def test_basic_write(self):
         db = _make_db()
@@ -55,11 +50,6 @@ class TestPutItem:
         db.put_item("TENANT#t1#USER", "1#u1", {"v": "ok"})
         kw = db.table.put_item.call_args.kwargs
         assert "ConditionExpression" not in kw
-
-
-# ---------------------------------------------------------------------------
-# put_item_async
-# ---------------------------------------------------------------------------
 
 
 class TestPutItemAsync:
@@ -88,11 +78,6 @@ class TestPutItemAsync:
             assert "ConditionExpression" not in kw
 
         asyncio.run(run())
-
-
-# ---------------------------------------------------------------------------
-# create_item (sync)
-# ---------------------------------------------------------------------------
 
 
 class TestCreateItem:
@@ -128,11 +113,6 @@ class TestCreateItem:
         db.table.put_item.return_value = {}
         db.create_item("TENANT#t1#USER", "1#u1", {"user_name": "New"})
         db.table.put_item.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# create_item_async
-# ---------------------------------------------------------------------------
 
 
 class TestCreateItemAsync:
