@@ -45,9 +45,7 @@ class TestFilterPolicy:
     def test_disallowed_field_fails(self):
         policy = FilterPolicy(allowed_fields=frozenset({"status"}))
 
-        with pytest.raises(
-            FilterPolicyViolationError, match="Field 'age' is not allowed"
-        ):
+        with pytest.raises(FilterPolicyViolationError, match="Field 'age' is not allowed"):
             validate_filter("age gt 18", policy)
 
     def test_disallowed_function_fails(self):
@@ -87,9 +85,7 @@ class TestPartitionKeyGuard:
     def test_db_filter_policy_is_enforced_on_get_all(self):
         db = _make_db(filter_policy=FilterPolicy(allowed_fields=frozenset({"status"})))
 
-        with pytest.raises(
-            FilterPolicyViolationError, match="Field 'age' is not allowed"
-        ):
+        with pytest.raises(FilterPolicyViolationError, match="Field 'age' is not allowed"):
             db.get_all("tenant::1", filter="age gt 18", item_only=True)
 
         db.table.query.assert_not_called()

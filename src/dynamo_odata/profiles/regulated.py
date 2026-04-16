@@ -129,20 +129,14 @@ def apply_response_field_policy(
     items: list[dict[str, Any]],
     forbidden_fields: frozenset[str],
 ) -> list[dict[str, Any]]:
-    return [
-        {key: value for key, value in item.items() if key not in forbidden_fields}
-        for item in items
-    ]
+    return [{key: value for key, value in item.items() if key not in forbidden_fields} for item in items]
 
 
 def apply_response_allowlist(
     items: list[dict[str, Any]],
     allowed_fields: frozenset[str],
 ) -> list[dict[str, Any]]:
-    return [
-        {key: value for key, value in item.items() if key in allowed_fields}
-        for item in items
-    ]
+    return [{key: value for key, value in item.items() if key in allowed_fields} for item in items]
 
 
 def validate_page_size(
@@ -153,9 +147,7 @@ def validate_page_size(
     if max_page_size < 1:
         raise ValueError("max_page_size must be >= 1")
 
-    normalized_default = (
-        max_page_size if default_page_size is None else default_page_size
-    )
+    normalized_default = max_page_size if default_page_size is None else default_page_size
     if normalized_default < 1:
         raise ValueError("default_page_size must be >= 1")
     if normalized_default > max_page_size:
