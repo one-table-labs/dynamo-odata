@@ -61,7 +61,7 @@ class TestQueryGsi:
             "ConsumedCapacity": None,
         }
 
-        items, cursor = db.query_gsi(
+        _, cursor = db.query_gsi(
             index_name="tenant-slug-index",
             pk_attr="tenantSlug",
             pk_value="acme",
