@@ -683,6 +683,83 @@ class DynamoDb:
                 ReturnConsumedCapacity="TOTAL",
             )
 
+    def update_item(self, pk: str, sk: str, updates: dict[str, Any]) -> dict[str, Any]:
+        """
+        Partial update (PATCH semantics) using ``UpdateExpression SET``.
+
+        Only the fields present in ``updates`` are written; all other
+        attributes on the existing item are left untouched.  Returns the
+        complete item after the update (``ReturnValues="ALL_NEW"``).
+
+        Key attributes (``PK`` / ``SK``) are stripped from ``updates``
+        automatically — pass them in the ``pk``/``sk`` arguments instead.
+
+        Args:
+            pk: Partition key value.
+            sk: Sort key value.
+            updates: Dict of attribute names → new values to set.
+
+        Returns:
+            The full item as it exists in DynamoDB after the update.
+
+        Raises:
+            ValueError: If ``pk`` fails partition-key validation or
+                ``updates`` is empty after stripping key attributes.
+        """
+        self._validate_partition_key(pk)
+        data = self._strip_key_attributes(self._convert_to_decimal(dict(updates)))
+        if not data:
+            raise ValueError("updates must contain at least one non-key attribute")
+
+        set_parts: list[str] = []
+        attr_values: dict[str, Any] = {}
+        attr_names: dict[str, str] = {}
+        for field, value in data.items():
+            attr_names[f"#{field}"] = field
+            attr_values[f":{field}"] = value
+            set_parts.append(f"#{field}=:{field}")
+
+        response = self.table.update_item(
+            Key=self._key_dict(pk, sk),
+            UpdateExpression="SET " + ",".join(set_parts),
+            ExpressionAttributeNames=attr_names,
+            ExpressionAttributeValues=attr_values,
+            ReturnValues="ALL_NEW",
+            ReturnConsumedCapacity="TOTAL",
+        )
+        self.add_consumed_capacity(response.get("ConsumedCapacity"))
+        return response.get("Attributes", {})
+
+    async def update_item_async(self, pk: str, sk: str, updates: dict[str, Any]) -> dict[str, Any]:
+        """Async version of :meth:`update_item`."""
+        self._validate_partition_key(pk)
+        data = self._strip_key_attributes(self._convert_to_decimal(dict(updates)))
+        if not data:
+            raise ValueError("updates must contain at least one non-key attribute")
+
+        set_parts: list[str] = []
+        attr_values: dict[str, Any] = {}
+        attr_names: dict[str, str] = {}
+        for field, value in data.items():
+            attr_names[f"#{field}"] = field
+            attr_values[f":{field}"] = value
+            set_parts.append(f"#{field}=:{field}")
+
+        params: dict[str, Any] = {
+            "Key": self._key_dict(pk, sk),
+            "UpdateExpression": "SET " + ",".join(set_parts),
+            "ExpressionAttributeNames": attr_names,
+            "ExpressionAttributeValues": attr_values,
+            "ReturnValues": "ALL_NEW",
+            "ReturnConsumedCapacity": "TOTAL",
+        }
+        session = _get_aioboto3_session()
+        async with session.resource("dynamodb", region_name=self.region) as resource:
+            table = await resource.Table(self.table.name)
+            response = await table.update_item(**params)
+        self.add_consumed_capacity(response.get("ConsumedCapacity"))
+        return response.get("Attributes", {})
+
     def delete(
         self,
         pk: str,

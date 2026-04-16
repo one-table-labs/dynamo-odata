@@ -48,4 +48,5 @@ tests/test_put_item_create_item.py
 tests/test_regulated_profile.py
 tests/test_scan_all_paginated.py
 tests/test_smoke.py
+tests/test_update_item.py
 tests/test_upstream_dynamodb_api.py

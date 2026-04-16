@@ -1,4 +1,5 @@
 """Tests for DynamoDb.put_item, put_item_async, create_item, create_item_async."""
+
 from __future__ import annotations
 
 import asyncio

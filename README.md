@@ -6,8 +6,11 @@ DynamoDB-focused OData toolkit: build filters, projections, and query DynamoDB t
 - OData `$filter` expressions → boto3 `ConditionBase` (no string eval, fully type-safe)
 - OData `$select` → `ProjectionExpression` with reserved keyword handling
 - DynamoDB CRUD operations with sync and async (`aioboto3`) parity
-- Single-table design helpers (`1#`/`0#` active prefix, soft/hard delete)
-- 133 tests, lark-based parser, Python 3.10+
+- Single-table design helpers (`1#`/`0#` active prefix, soft/hard delete, restore)
+- Atomic multi-item writes via `transact_write`
+- GSI queries with OData filter support
+- Pydantic-friendly: call `model.model_dump(exclude_none=True)` before writes — see [Pydantic integration](#pydantic-integration)
+- 197 tests, lark-based parser, Python 3.10+
 
 **What this is:** A focused DynamoDB library. Not an ORM, not a general SQL tool, not a full OData server.
 
@@ -32,7 +35,7 @@ pip install dynamo-odata[dev]
 
 ### AWS Credentials
 
-`dynamo-odata` uses `boto3`, so configure AWS credentials as you normally would:
+- `dynamo-odata` uses `boto3`, so configure AWS credentials as you normally would:
 
 ```bash
 # Option 1: Environment variables
@@ -397,7 +400,13 @@ db = DynamoDb(
 | `get` / `get_async` | `pk, sk, [item_only]` | dict or Item | Single item lookup |
 | `get_all` / `get_all_async` | `pk, [filter, select, item_only, include_inactive]` | list[dict] | Query with filter |
 | `batch_get` / `batch_get_async` | `pk, sks, [item_only]` | list[dict] | Multiple items, auto-chunked |
-| `put` / `put_async` | `pk, sk, data` | None | Create or update |
+| `put` / `put_async` | `pk, sk, data` | None | Unconditional full-item replace (PUT semantics) |
+| `put_item` / `put_item_async` | `pk, sk, item` | None | Unconditional write; does not strip key attrs |
+| `create_item` / `create_item_async` | `pk, sk, item` | None | Conditional write — raises if item already exists |
+| `update_item` / `update_item_async` | `pk, sk, updates` | dict | Partial update (PATCH); returns full item after write |
+| `query_gsi` / `query_gsi_async` | `index_name, pk_attr, pk_value, [sk_*, filter, limit, cursor]` | (list[dict], cursor) | GSI query with optional SK conditions and pagination |
+| `transact_write` / `transact_write_async` | `operations` | None | Atomic multi-item write (up to 25 ops); TableName injected automatically |
+| `restore` / `restore_async` | `pk, sk_body, [restore_data]` | None | Swap SK from `0#` → `1#`, clear deleted_* attrs |
 | `delete` / `delete_async` | `pk, sk` | None | Hard delete |
 | `soft_delete` / `soft_delete_async` | `pk, sk` | None | Soft delete (prefix move) |
 | `hard_delete` / `hard_delete_async` | `pk, sk` | None | Permanent delete |
@@ -419,6 +428,33 @@ db = DynamoDb(
 | `build_inactive_sk` | `value` | str | Ensures inactive SK prefix (`0#` by default) |
 | `is_active_sk` | `value` | bool | Checks active prefix |
 | `is_inactive_sk` | `value` | bool | Checks inactive prefix |
+
+---
+
+## Pydantic Integration
+
+`dynamo-odata` is Pydantic-agnostic — it works with plain dicts. The recommended
+pattern when using Pydantic models is to serialise to dict before writing and
+deserialise after reading:
+
+```python
+from dynamo_odata import DynamoDb, UPPERCASE_KEY_SCHEMA
+from pydantic import BaseModel
+
+db = DynamoDb(table_name="main", key_schema=UPPERCASE_KEY_SCHEMA)
+
+# Write — exclude_none=True prevents boto3 rejecting null attribute values
+item = my_model.model_dump(exclude_none=True)
+db.put_item(pk, sk, item)
+
+# Read
+raw = db.get(pk, sk, item_only=True)
+model = MyModel(**raw)
+```
+
+For models with optional fields, always pass `exclude_none=True` (or
+`exclude_unset=True` for partial updates). DynamoDB's resource interface
+rejects `None` attribute values with a `TypeError`.
 
 ---
 
