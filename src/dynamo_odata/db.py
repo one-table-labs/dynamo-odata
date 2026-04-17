@@ -14,7 +14,10 @@ from .projection import build_projection
 from .schema import KeySchema
 
 
-def _get_aioboto3_session():
+def _get_aioboto3_session(async_session: Any = None) -> Any:
+    """Return provided async session or construct a default aioboto3 session."""
+    if async_session is not None:
+        return async_session
     import aioboto3
 
     return aioboto3.Session()
@@ -31,6 +34,7 @@ class DynamoDb:
         table_name: str,
         region: str | None = None,
         resource: Any = None,
+        async_session: Any = None,
         key_schema: KeySchema | None = None,
         partition_key_guard: PartitionKeyGuard | None = None,
         filter_policy: FilterPolicy | None = None,
@@ -39,6 +43,7 @@ class DynamoDb:
     ) -> None:
         self.region = region or "us-west-2"
         self.db = resource or boto3.resource("dynamodb", region_name=self.region)
+        self._async_session = async_session
         self.table = self.db.Table(table_name)
         self.consumed_capacity: float = 0.0
         if key_schema is None:
@@ -67,6 +72,10 @@ class DynamoDb:
     @staticmethod
     def _now_iso() -> str:
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    def _get_aioboto3_session(self) -> Any:
+        """Return the configured aioboto3 session, or a default one if none was provided."""
+        return _get_aioboto3_session(self._async_session)
 
     def add_consumed_capacity(self, consumed_capacity: Any) -> None:
         if not consumed_capacity:
@@ -194,6 +203,7 @@ class DynamoDb:
         sk_begins_with: str | None = None,
         lsi: bool | str = False,
         consistent_read: bool = False,
+        scan_index_forward: bool = True,
     ) -> dict[str, Any] | list[dict[str, Any]]:
         self._validate_partition_key(pk)
         del next_link
@@ -202,6 +212,7 @@ class DynamoDb:
         params: dict[str, Any] = {
             "ReturnConsumedCapacity": "TOTAL",
             "Limit": chunk_size,
+            "ScanIndexForward": scan_index_forward,
         }
 
         if consistent_read and lsi is False:
@@ -318,7 +329,7 @@ class DynamoDb:
         if not sks:
             return []
 
-        session = _get_aioboto3_session()
+        session = self._get_aioboto3_session()
         table_name = self.table.name
         keys = self._normalize_sks(pk, sks)
 
@@ -386,7 +397,7 @@ class DynamoDb:
                 if expr_attr_names:
                     params["ExpressionAttributeNames"] = expr_attr_names
 
-        session = _get_aioboto3_session()
+        session = self._get_aioboto3_session()
         async with session.resource("dynamodb", region_name=self.region) as resource:
             table = await resource.Table(self.table.name)
             response = await table.get_item(**params)
@@ -409,6 +420,7 @@ class DynamoDb:
         sk_begins_with: str | None = None,
         lsi: bool | str = False,
         consistent_read: bool = False,
+        scan_index_forward: bool = True,
     ) -> dict[str, Any] | list[dict[str, Any]]:
         self._validate_partition_key(pk)
         del next_link
@@ -417,6 +429,7 @@ class DynamoDb:
         params: dict[str, Any] = {
             "ReturnConsumedCapacity": "TOTAL",
             "Limit": chunk_size,
+            "ScanIndexForward": scan_index_forward,
         }
 
         if consistent_read and lsi is False:
@@ -457,7 +470,7 @@ class DynamoDb:
 
         items: list[dict[str, Any]] = []
         last_evaluated_key: Any = True
-        session = _get_aioboto3_session()
+        session = self._get_aioboto3_session()
         async with session.resource("dynamodb", region_name=self.region) as resource:
             table = await resource.Table(self.table.name)
             while last_evaluated_key is not None:
@@ -594,7 +607,7 @@ class DynamoDb:
         if expression_attribute_names:
             params["ExpressionAttributeNames"] = expression_attribute_names
 
-        session = _get_aioboto3_session()
+        session = self._get_aioboto3_session()
         async with session.resource("dynamodb", region_name=self.region) as resource:
             table = await resource.Table(self.table.name)
             response = await table.update_item(**params)
@@ -632,7 +645,7 @@ class DynamoDb:
         body = self._convert_to_decimal(dict(item))
         body = self._strip_key_attributes(body)
         full_item = {self.partition_key_name: pk, self.sort_key_name: sk, **body}
-        session = _get_aioboto3_session()
+        session = self._get_aioboto3_session()
         async with session.resource("dynamodb", region_name=self.region) as resource:
             table = await resource.Table(self.table.name)
             await table.put_item(Item=full_item, ReturnConsumedCapacity="TOTAL")
@@ -674,7 +687,7 @@ class DynamoDb:
         body = self._convert_to_decimal(dict(item))
         body = self._strip_key_attributes(body)
         full_item = {self.partition_key_name: pk, self.sort_key_name: sk, **body}
-        session = _get_aioboto3_session()
+        session = self._get_aioboto3_session()
         async with session.resource("dynamodb", region_name=self.region) as resource:
             table = await resource.Table(self.table.name)
             await table.put_item(
@@ -753,7 +766,7 @@ class DynamoDb:
             "ReturnValues": "ALL_NEW",
             "ReturnConsumedCapacity": "TOTAL",
         }
-        session = _get_aioboto3_session()
+        session = self._get_aioboto3_session()
         async with session.resource("dynamodb", region_name=self.region) as resource:
             table = await resource.Table(self.table.name)
             response = await table.update_item(**params)
@@ -901,7 +914,7 @@ class DynamoDb:
         if sk is None:
             raise ValueError("Either sk or sk_begins_with must be provided")
 
-        session = _get_aioboto3_session()
+        session = self._get_aioboto3_session()
         if is_purge:
             async with session.resource("dynamodb", region_name=self.region) as resource:
                 table = await resource.Table(self.table.name)
@@ -1152,7 +1165,7 @@ class DynamoDb:
 
             params["ExclusiveStartKey"] = json.loads(base64.b64decode(cursor.encode()).decode())
 
-        session = _get_aioboto3_session()
+        session = self._get_aioboto3_session()
         async with session.resource("dynamodb", region_name=self.region) as resource:
             table = await resource.Table(self.table.name)
             response = await table.query(**params)
@@ -1226,7 +1239,7 @@ class DynamoDb:
                 typed_op[action] = {"TableName": table_name, **params}
             typed_ops.append(typed_op)
 
-        session = _get_aioboto3_session()
+        session = self._get_aioboto3_session()
         async with session.client("dynamodb", region_name=self.region) as client:
             await client.transact_write_items(TransactItems=typed_ops)
 
@@ -1296,7 +1309,7 @@ class DynamoDb:
         if skip_token is not None:
             params["ExclusiveStartKey"] = skip_token
 
-        session = _get_aioboto3_session()
+        session = self._get_aioboto3_session()
         async with session.resource("dynamodb", region_name=self.region) as resource:
             table = await resource.Table(self.table.name)
             response = await table.scan(**params)
