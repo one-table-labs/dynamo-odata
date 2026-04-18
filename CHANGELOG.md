@@ -4,14 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.1] - 2026-04-16
+## [0.5.1] - 2026-04-17
 
-### Changed
+### Fixed
 
-- Tightened OData Dynamo visitor implementation by removing dead/commented code and simplifying null/between handling paths.
-- Updated tests for batch-get and OData filter cases to align with lint/style rules and keep CI green.
-
----
+- Async DynamoDB operations now support injecting a configured aioboto3 session via
+  the `async_session` constructor argument, allowing callers to use profile-aware
+  credentials and environment-specific endpoints consistently.
+- Profile/credential drift between sync boto3 and async aioboto3 call paths is
+  eliminated when `async_session` is provided by the application.
 
 ## [0.5.0] - 2026-04-16
 
