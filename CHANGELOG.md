@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-04-19
+
+### Added
+
+- `get_all` / `get_all_async` now accept `filter_expr: ConditionBase | None` — a
+  pre-built boto3 condition that is AND-merged with any OData `filter` string.
+  Previously there was no way to pass a boto3 condition to a PK-scoped query; callers
+  had to work around this with `query_gsi_async` even when they only needed a simple
+  partition-key scan with a compound filter.
+- `delete_item(pk, sk)` and `delete_item_async(pk, sk)` convenience aliases for
+  `hard_delete` / `hard_delete_async`. Eliminates `AttributeError` crashes in callers
+  that used the intuitive name.
+
+### Fixed
+
+- `transact_write_async` now forwards `endpoint_url` to the aioboto3 client, matching
+  the behaviour of the sync `transact_write`. Previously, `restore_async` (which calls
+  `transact_write_async`) would connect to the real AWS endpoint instead of
+  DynamoDB Local or moto in local-dev and test environments.
+
 ## [0.5.1] - 2026-04-17
 
 ### Fixed

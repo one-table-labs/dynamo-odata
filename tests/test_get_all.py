@@ -59,6 +59,29 @@ class TestGetAllSync:
         assert result == [{"pk": "a"}]
 
 
+    def test_get_all_with_filter_expr(self):
+        db = _make_db()
+        db.table.query.return_value = {"Items": [{"pk": "a"}], "Count": 1}
+        from boto3.dynamodb.conditions import Attr
+
+        expr = Attr("lsis1").eq("active")
+        result = db.get_all("user::t1", filter_expr=expr, item_only=True)
+
+        kwargs = db.table.query.call_args.kwargs
+        assert isinstance(kwargs["FilterExpression"], ConditionBase)
+        assert result == [{"pk": "a"}]
+
+    def test_get_all_filter_and_filter_expr_are_combined(self):
+        db = _make_db()
+        db.table.query.return_value = {"Items": [], "Count": 0}
+        from boto3.dynamodb.conditions import Attr
+
+        db.get_all("user::t1", filter="status eq 'active'", filter_expr=Attr("SK").begins_with("1#"))
+
+        kwargs = db.table.query.call_args.kwargs
+        assert isinstance(kwargs["FilterExpression"], ConditionBase)
+
+
 class TestGetAllAsync:
     def _make_ctx(self, responses):
         mock_table = AsyncMock()
@@ -79,6 +102,21 @@ class TestGetAllAsync:
             result = asyncio.run(db.get_all_async("user::t1", item_only=True))
 
         assert result == [{"pk": "a"}]
+
+    def test_get_all_async_with_filter_expr(self):
+        db = _make_db()
+        from boto3.dynamodb.conditions import Attr
+
+        ctx = self._make_ctx([{"Items": [{"pk": "a"}], "Count": 1}])
+        with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
+            mock_session.return_value.resource.return_value = ctx
+            result = asyncio.run(
+                db.get_all_async("user::t1", filter_expr=Attr("lsis1").eq("active"), item_only=True)
+            )
+
+        assert result == [{"pk": "a"}]
+        kwargs = ctx.__aenter__.return_value.Table.return_value.query.call_args.kwargs
+        assert isinstance(kwargs["FilterExpression"], ConditionBase)
 
     def test_get_all_async_paginates(self):
         db = _make_db()

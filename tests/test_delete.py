@@ -67,6 +67,16 @@ class TestDeleteSync:
         assert put_kwargs["sk"] == "0|x"
 
 
+    def test_delete_item_is_alias_for_hard_delete(self):
+        db = _make_db()
+        db.table.delete_item.return_value = {"Attributes": {"pk": "a"}}
+
+        result = db.delete_item("a", "1#x")
+
+        assert result == {"Attributes": {"pk": "a"}}
+        db.table.delete_item.assert_called_once()
+
+
 class TestDeleteAsync:
     def _make_ctx(self, response):
         mock_table = AsyncMock()
@@ -85,6 +95,16 @@ class TestDeleteAsync:
         with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
             mock_session.return_value.resource.return_value = ctx
             result = asyncio.run(db.hard_delete_async("a", "1#x"))
+
+        assert result == {"Attributes": {"pk": "a"}}
+
+    def test_delete_item_async_is_alias_for_hard_delete_async(self):
+        db = _make_db()
+        ctx = self._make_ctx({"Attributes": {"pk": "a"}})
+
+        with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
+            mock_session.return_value.resource.return_value = ctx
+            result = asyncio.run(db.delete_item_async("a", "1#x"))
 
         assert result == {"Attributes": {"pk": "a"}}
 

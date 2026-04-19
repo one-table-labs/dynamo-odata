@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Attr, Key
+from boto3.dynamodb.conditions import Attr, ConditionBase, Key
 
 from .dynamo_filter import build_filter
 from .guardrails import FilterPolicy, PartitionKeyGuard
@@ -194,6 +194,7 @@ class DynamoDb:
         self,
         pk: str,
         filter: str | None = None,
+        filter_expr: ConditionBase | None = None,
         select: str | None = None,
         limit: int = 1000,
         skip_token: dict[str, Any] | None = None,
@@ -237,8 +238,12 @@ class DynamoDb:
         else:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk)
 
+        effective_filter: ConditionBase | None = filter_expr
         if filter is not None:
-            params["FilterExpression"] = self._build_filter_expression(filter)
+            odata_expr = self._build_filter_expression(filter)
+            effective_filter = (odata_expr & filter_expr) if filter_expr is not None else odata_expr
+        if effective_filter is not None:
+            params["FilterExpression"] = effective_filter
 
         if select is not None:
             select_fields = [field.strip() for field in select.split(",") if field.strip()]
@@ -411,6 +416,7 @@ class DynamoDb:
         self,
         pk: str,
         filter: str | None = None,
+        filter_expr: ConditionBase | None = None,
         select: str | None = None,
         limit: int = 1000,
         skip_token: dict[str, Any] | None = None,
@@ -454,8 +460,12 @@ class DynamoDb:
         else:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk)
 
+        effective_filter: ConditionBase | None = filter_expr
         if filter is not None:
-            params["FilterExpression"] = self._build_filter_expression(filter)
+            odata_expr = self._build_filter_expression(filter)
+            effective_filter = (odata_expr & filter_expr) if filter_expr is not None else odata_expr
+        if effective_filter is not None:
+            params["FilterExpression"] = effective_filter
 
         if select is not None:
             select_fields = [field.strip() for field in select.split(",") if field.strip()]
@@ -962,6 +972,14 @@ class DynamoDb:
     async def hard_delete_async(self, pk: str, sk: str) -> dict[str, Any]:
         return await self.delete_async(pk=pk, sk=sk, is_purge=True)
 
+    def delete_item(self, pk: str, sk: str) -> dict[str, Any]:
+        """Alias for :meth:`hard_delete`. Permanently removes an item."""
+        return self.hard_delete(pk, sk)
+
+    async def delete_item_async(self, pk: str, sk: str) -> dict[str, Any]:
+        """Alias for :meth:`hard_delete_async`. Permanently removes an item."""
+        return await self.hard_delete_async(pk, sk)
+
     def restore(self, pk: str, sk_body: str, restore_data: dict[str, Any] | None = None) -> dict[str, Any]:
         """
         Restore a soft-deleted item: atomically swaps SK from 0# → 1#.
@@ -1240,7 +1258,11 @@ class DynamoDb:
             typed_ops.append(typed_op)
 
         session = self._get_aioboto3_session()
-        async with session.client("dynamodb", region_name=self.region) as client:
+        client_kwargs: dict[str, Any] = {"region_name": self.region}
+        endpoint_url = getattr(self.table.meta.client.meta, "endpoint_url", None)
+        if endpoint_url:
+            client_kwargs["endpoint_url"] = endpoint_url
+        async with session.client("dynamodb", **client_kwargs) as client:
             await client.transact_write_items(TransactItems=typed_ops)
 
     def scan_all_paginated(
