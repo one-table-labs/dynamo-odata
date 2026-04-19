@@ -196,23 +196,34 @@ class DynamoDb:
         filter: str | None = None,
         filter_expr: ConditionBase | None = None,
         select: str | None = None,
-        limit: int = 1000,
+        limit: int = 25,
+        cursor: str | None = None,
         skip_token: dict[str, Any] | None = None,
         active: bool | None = True,
         next_link: str | None = None,
-        item_only: bool = False,
+        fetch_all: bool = False,
         sk_begins_with: str | None = None,
         lsi: bool | str = False,
         consistent_read: bool = False,
         scan_index_forward: bool = True,
-    ) -> dict[str, Any] | list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """Query a partition key and return ``(items, next_cursor)``.
+
+        Args:
+            fetch_all: When ``True``, auto-paginate through every DynamoDB page and
+                return all items with ``next_cursor=None``.  When ``False`` (default),
+                return at most ``limit`` items and a base64 cursor for the next page.
+            cursor: Opaque base64 pagination cursor from a previous call.  Mutually
+                exclusive with ``skip_token``.
+            skip_token: Raw ``LastEvaluatedKey`` dict (deprecated — use ``cursor``).
+        """
+        import base64
+        import json
+
         self._validate_partition_key(pk)
         del next_link
-        requested_limit = limit
-        chunk_size = min(limit, 500) if limit != 1000 else 500
         params: dict[str, Any] = {
             "ReturnConsumedCapacity": "TOTAL",
-            "Limit": chunk_size,
             "ScanIndexForward": scan_index_forward,
         }
 
@@ -227,7 +238,7 @@ class DynamoDb:
             ).begins_with(sk_begins_with)
         elif active is None:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk)
-        elif active is True and pk != "tenants":
+        elif active is True:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk) & Key(
                 self.sort_key_name
             ).begins_with(self.ACTIVE_PREFIX)
@@ -253,28 +264,38 @@ class DynamoDb:
                 if expr_attr_names:
                     params["ExpressionAttributeNames"] = expr_attr_names
 
-        if skip_token is not None:
-            params["ExclusiveStartKey"] = skip_token
+        start_key: dict[str, Any] | None = None
+        if cursor is not None:
+            start_key = json.loads(base64.b64decode(cursor.encode()).decode())
+        elif skip_token is not None:
+            start_key = skip_token
+        if start_key is not None:
+            params["ExclusiveStartKey"] = start_key
 
         items: list[dict[str, Any]] = []
-        last_evaluated_key: Any = True
-        while last_evaluated_key is not None:
-            if len(items) >= requested_limit and requested_limit != 1000:
-                break
-            result = self.table.query(**params)
-            self.add_consumed_capacity(result.get("ConsumedCapacity"))
-            items.extend(result.get("Items", []))
-            last_evaluated_key = result.get("LastEvaluatedKey")
-            if last_evaluated_key is not None:
-                params["ExclusiveStartKey"] = last_evaluated_key
-            else:
-                params.pop("ExclusiveStartKey", None)
 
-        if requested_limit != 1000 and len(items) > requested_limit:
-            items = items[:requested_limit]
+        if fetch_all:
+            params["Limit"] = 500
+            last_key: Any = True
+            while last_key is not None:
+                result = self.table.query(**params)
+                self.add_consumed_capacity(result.get("ConsumedCapacity"))
+                items.extend(result.get("Items", []))
+                last_key = result.get("LastEvaluatedKey")
+                if last_key:
+                    params["ExclusiveStartKey"] = last_key
+                else:
+                    params.pop("ExclusiveStartKey", None)
+            return items, None
 
-        response = {"Items": items, "Count": len(items)}
-        return response["Items"] if item_only else response
+        params["Limit"] = limit
+        result = self.table.query(**params)
+        self.add_consumed_capacity(result.get("ConsumedCapacity"))
+        items = result.get("Items", [])
+        next_cursor: str | None = None
+        if last_evaluated := result.get("LastEvaluatedKey"):
+            next_cursor = base64.b64encode(json.dumps(last_evaluated).encode()).decode()
+        return items, next_cursor
 
     def batch_get(
         self,
@@ -418,23 +439,25 @@ class DynamoDb:
         filter: str | None = None,
         filter_expr: ConditionBase | None = None,
         select: str | None = None,
-        limit: int = 1000,
+        limit: int = 25,
+        cursor: str | None = None,
         skip_token: dict[str, Any] | None = None,
         active: bool | None = True,
         next_link: str | None = None,
-        item_only: bool = False,
+        fetch_all: bool = False,
         sk_begins_with: str | None = None,
         lsi: bool | str = False,
         consistent_read: bool = False,
         scan_index_forward: bool = True,
-    ) -> dict[str, Any] | list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """Async version of :meth:`get_all`. Returns ``(items, next_cursor)``."""
+        import base64
+        import json
+
         self._validate_partition_key(pk)
         del next_link
-        requested_limit = limit
-        chunk_size = min(limit, 500) if limit != 1000 else 500
         params: dict[str, Any] = {
             "ReturnConsumedCapacity": "TOTAL",
-            "Limit": chunk_size,
             "ScanIndexForward": scan_index_forward,
         }
 
@@ -449,7 +472,7 @@ class DynamoDb:
             ).begins_with(sk_begins_with)
         elif active is None:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk)
-        elif active is True and pk != "tenants":
+        elif active is True:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk) & Key(
                 self.sort_key_name
             ).begins_with(self.ACTIVE_PREFIX)
@@ -475,31 +498,41 @@ class DynamoDb:
                 if expr_attr_names:
                     params["ExpressionAttributeNames"] = expr_attr_names
 
-        if skip_token is not None:
-            params["ExclusiveStartKey"] = skip_token
+        start_key: dict[str, Any] | None = None
+        if cursor is not None:
+            start_key = json.loads(base64.b64decode(cursor.encode()).decode())
+        elif skip_token is not None:
+            start_key = skip_token
+        if start_key is not None:
+            params["ExclusiveStartKey"] = start_key
 
         items: list[dict[str, Any]] = []
-        last_evaluated_key: Any = True
         session = self._get_aioboto3_session()
         async with session.resource("dynamodb", region_name=self.region) as resource:
             table = await resource.Table(self.table.name)
-            while last_evaluated_key is not None:
-                if len(items) >= requested_limit and requested_limit != 1000:
-                    break
-                result = await table.query(**params)
-                self.add_consumed_capacity(result.get("ConsumedCapacity"))
-                items.extend(result.get("Items", []))
-                last_evaluated_key = result.get("LastEvaluatedKey")
-                if last_evaluated_key is not None:
-                    params["ExclusiveStartKey"] = last_evaluated_key
-                else:
-                    params.pop("ExclusiveStartKey", None)
 
-        if requested_limit != 1000 and len(items) > requested_limit:
-            items = items[:requested_limit]
+            if fetch_all:
+                params["Limit"] = 500
+                last_key: Any = True
+                while last_key is not None:
+                    result = await table.query(**params)
+                    self.add_consumed_capacity(result.get("ConsumedCapacity"))
+                    items.extend(result.get("Items", []))
+                    last_key = result.get("LastEvaluatedKey")
+                    if last_key:
+                        params["ExclusiveStartKey"] = last_key
+                    else:
+                        params.pop("ExclusiveStartKey", None)
+                return items, None
 
-        response = {"Items": items, "Count": len(items)}
-        return response["Items"] if item_only else response
+            params["Limit"] = limit
+            result = await table.query(**params)
+            self.add_consumed_capacity(result.get("ConsumedCapacity"))
+            items = result.get("Items", [])
+            next_cursor: str | None = None
+            if last_evaluated := result.get("LastEvaluatedKey"):
+                next_cursor = base64.b64encode(json.dumps(last_evaluated).encode()).decode()
+            return items, next_cursor
 
     def put(
         self,

@@ -72,7 +72,7 @@ class TestPartitionKeyGuard:
             PartitionKeyValidationError,
             match="must start with one of: TENANT#",
         ):
-            db.get_all("DISEASE#abc", item_only=True)
+            db.get_all("DISEASE#abc")
 
     def test_guard_allows_tenant_partition(self):
         db = _make_db(partition_key_guard=PartitionKeyGuard(("TENANT#",)))
@@ -86,6 +86,6 @@ class TestPartitionKeyGuard:
         db = _make_db(filter_policy=FilterPolicy(allowed_fields=frozenset({"status"})))
 
         with pytest.raises(FilterPolicyViolationError, match="Field 'age' is not allowed"):
-            db.get_all("tenant::1", filter="age gt 18", item_only=True)
+            db.get_all("tenant::1", filter="age gt 18")
 
         db.table.query.assert_not_called()

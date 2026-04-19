@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-04-19
+
+### Changed
+
+- **Breaking:** `get_all` / `get_all_async` now return `tuple[list[dict], str | None]` — a list of
+  items and an opaque base64 cursor (or `None` when there are no more pages).
+  Previously returned `dict | list` depending on `item_only`, requiring callers to branch on the
+  type in every call site. The `item_only` parameter has been removed.
+- `limit` default changed from `1000` to `25`; callers that relied on the implicit
+  "fetch everything in one shot" behavior should pass `fetch_all=True` instead.
+
+### Added
+
+- `fetch_all: bool = False` parameter on `get_all` / `get_all_async`.
+  When `True`, the method auto-paginates through all DynamoDB pages (in chunks of 500) and
+  returns `(all_items, None)`. Replaces the previous unlimited-by-default behaviour.
+- `cursor: str | None = None` parameter on `get_all` / `get_all_async` — opaque base64-encoded
+  `LastEvaluatedKey`, matching the cursor convention already used by `query_gsi` / `query_gsi_async`.
+  Callers can now use a single consistent cursor pattern across all paginated methods.
+- `sk_begins_with`, `lsi`, `consistent_read`, `scan_index_forward` parameters exposed on
+  `get_all` / `get_all_async` for callers that previously needed workarounds.
+
+### Removed
+
+- `item_only` parameter from `get_all` / `get_all_async` (items are always returned directly).
+- Hardcoded `pk != "tenants"` special-case branch — callers control prefix logic via `active`.
+
+---
+
 ## [0.5.2] - 2026-04-19
 
 ### Added
