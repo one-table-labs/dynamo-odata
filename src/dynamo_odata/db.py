@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -40,6 +44,7 @@ class DynamoDb:
         filter_policy: FilterPolicy | None = None,
         pk_separator: str = DEFAULT_PK_SEPARATOR,
         sk_separator: str = DEFAULT_SK_SEPARATOR,
+        cursor_secret: str | None = None,
     ) -> None:
         self.region = region or "us-west-2"
         self.db = resource or boto3.resource("dynamodb", region_name=self.region)
@@ -68,10 +73,41 @@ class DynamoDb:
         self.sk_separator = schema.sk_separator
         self.ACTIVE_PREFIX = schema.active_prefix
         self.INACTIVE_PREFIX = schema.inactive_prefix
+        self._cursor_secret: bytes | None = cursor_secret.encode() if cursor_secret else None
 
     @staticmethod
     def _now_iso() -> str:
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    def _encode_cursor(self, last_evaluated_key: dict[str, Any]) -> str:
+        """Encode a LastEvaluatedKey as an opaque cursor string.
+
+        When ``cursor_secret`` was provided at construction the payload is
+        HMAC-SHA256 signed, producing ``<b64payload>.<b64sig>``.  Without a
+        secret the cursor is plain base64 (backward-compatible default).
+        """
+        payload = base64.b64encode(json.dumps(last_evaluated_key).encode()).decode()
+        if self._cursor_secret is None:
+            return payload
+        sig = hmac.new(self._cursor_secret, payload.encode(), hashlib.sha256).digest()
+        return f"{payload}.{base64.b64encode(sig).decode()}"
+
+    def _decode_cursor(self, cursor: str) -> dict[str, Any]:
+        """Decode and (if signed) verify a pagination cursor.
+
+        Raises ``ValueError`` when a ``cursor_secret`` is configured and the
+        cursor signature does not match — indicating a tampered or invalid token.
+        """
+        if self._cursor_secret is not None:
+            parts = cursor.rsplit(".", 1)
+            if len(parts) != 2:
+                raise ValueError("Invalid pagination cursor: missing signature")
+            payload, sig_b64 = parts
+            expected = hmac.new(self._cursor_secret, payload.encode(), hashlib.sha256).digest()
+            if not hmac.compare_digest(base64.b64decode(sig_b64), expected):
+                raise ValueError("Invalid pagination cursor: signature mismatch")
+            return json.loads(base64.b64decode(payload.encode()).decode())
+        return json.loads(base64.b64decode(cursor.encode()).decode())
 
     def _get_aioboto3_session(self) -> Any:
         """Return the configured aioboto3 session, or a default one if none was provided."""
@@ -217,9 +253,6 @@ class DynamoDb:
                 exclusive with ``skip_token``.
             skip_token: Raw ``LastEvaluatedKey`` dict (deprecated — use ``cursor``).
         """
-        import base64
-        import json
-
         self._validate_partition_key(pk)
         del next_link
         params: dict[str, Any] = {
@@ -266,7 +299,7 @@ class DynamoDb:
 
         start_key: dict[str, Any] | None = None
         if cursor is not None:
-            start_key = json.loads(base64.b64decode(cursor.encode()).decode())
+            start_key = self._decode_cursor(cursor)
         elif skip_token is not None:
             start_key = skip_token
         if start_key is not None:
@@ -294,7 +327,7 @@ class DynamoDb:
         items = result.get("Items", [])
         next_cursor: str | None = None
         if last_evaluated := result.get("LastEvaluatedKey"):
-            next_cursor = base64.b64encode(json.dumps(last_evaluated).encode()).decode()
+            next_cursor = self._encode_cursor(last_evaluated)
         return items, next_cursor
 
     def batch_get(
@@ -451,9 +484,6 @@ class DynamoDb:
         scan_index_forward: bool = True,
     ) -> tuple[list[dict[str, Any]], str | None]:
         """Async version of :meth:`get_all`. Returns ``(items, next_cursor)``."""
-        import base64
-        import json
-
         self._validate_partition_key(pk)
         del next_link
         params: dict[str, Any] = {
@@ -500,7 +530,7 @@ class DynamoDb:
 
         start_key: dict[str, Any] | None = None
         if cursor is not None:
-            start_key = json.loads(base64.b64decode(cursor.encode()).decode())
+            start_key = self._decode_cursor(cursor)
         elif skip_token is not None:
             start_key = skip_token
         if start_key is not None:
@@ -531,7 +561,7 @@ class DynamoDb:
             items = result.get("Items", [])
             next_cursor: str | None = None
             if last_evaluated := result.get("LastEvaluatedKey"):
-                next_cursor = base64.b64encode(json.dumps(last_evaluated).encode()).decode()
+                next_cursor = self._encode_cursor(last_evaluated)
             return items, next_cursor
 
     def put(
@@ -1150,10 +1180,7 @@ class DynamoDb:
             params["FilterExpression"] = effective_filter
 
         if cursor is not None:
-            import base64
-            import json
-
-            params["ExclusiveStartKey"] = json.loads(base64.b64decode(cursor.encode()).decode())
+            params["ExclusiveStartKey"] = self._decode_cursor(cursor)
 
         response = self.table.query(**params)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
@@ -1161,10 +1188,7 @@ class DynamoDb:
 
         next_cursor: str | None = None
         if last_key := response.get("LastEvaluatedKey"):
-            import base64
-            import json
-
-            next_cursor = base64.b64encode(json.dumps(last_key).encode()).decode()
+            next_cursor = self._encode_cursor(last_key)
 
         return items, next_cursor
 
@@ -1211,10 +1235,7 @@ class DynamoDb:
             params["FilterExpression"] = effective_filter
 
         if cursor is not None:
-            import base64
-            import json
-
-            params["ExclusiveStartKey"] = json.loads(base64.b64decode(cursor.encode()).decode())
+            params["ExclusiveStartKey"] = self._decode_cursor(cursor)
 
         session = self._get_aioboto3_session()
         async with session.resource("dynamodb", region_name=self.region) as resource:
@@ -1225,10 +1246,7 @@ class DynamoDb:
 
         next_cursor: str | None = None
         if last_key := response.get("LastEvaluatedKey"):
-            import base64
-            import json
-
-            next_cursor = base64.b64encode(json.dumps(last_key).encode()).decode()
+            next_cursor = self._encode_cursor(last_key)
 
         return items, next_cursor
 

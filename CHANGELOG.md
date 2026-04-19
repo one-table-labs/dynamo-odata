@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-04-19
+
+### Added
+
+- `cursor_secret: str | None` constructor parameter.  When provided, all pagination
+  cursors are HMAC-SHA256 signed: `<b64payload>.<b64sig>`.  Cursors produced by one
+  instance can only be decoded by an instance with the same secret; a mismatched or
+  truncated signature raises `ValueError("Invalid pagination cursor: …")`.
+  Without a secret the cursor is plain base64 (default, backward-compatible).
+- `_encode_cursor` / `_decode_cursor` helper methods replace six previously inline
+  `base64 / json` call sites across `get_all`, `get_all_async`, `query_gsi`, and
+  `query_gsi_async`.  Signing is applied consistently across all paginated methods.
+
+---
+
 ## [0.6.0] - 2026-04-19
 
 ### Changed
