@@ -66,7 +66,6 @@ class TestDeleteSync:
         put_kwargs = db.put.call_args.kwargs
         assert put_kwargs["sk"] == "0|x"
 
-
     def test_delete_item_is_alias_for_hard_delete(self):
         db = _make_db()
         db.table.delete_item.return_value = {"Attributes": {"pk": "a"}}

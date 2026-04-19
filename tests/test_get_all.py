@@ -138,9 +138,7 @@ class TestGetAllAsync:
         ctx = self._make_ctx([{"Items": [{"pk": "a"}], "Count": 1}])
         with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
             mock_session.return_value.resource.return_value = ctx
-            items, _ = asyncio.run(
-                db.get_all_async("user::t1", filter_expr=Attr("lsis1").eq("active"))
-            )
+            items, _ = asyncio.run(db.get_all_async("user::t1", filter_expr=Attr("lsis1").eq("active")))
 
         assert items == [{"pk": "a"}]
         kwargs = ctx.__aenter__.return_value.Table.return_value.query.call_args.kwargs
@@ -168,9 +166,7 @@ class TestGetAllAsync:
 
     def test_get_all_async_returns_cursor(self):
         db = _make_db()
-        ctx = self._make_ctx(
-            [{"Items": [{"pk": "a"}], "Count": 1, "LastEvaluatedKey": {"pk": "a", "sk": "1#1"}}]
-        )
+        ctx = self._make_ctx([{"Items": [{"pk": "a"}], "Count": 1, "LastEvaluatedKey": {"pk": "a", "sk": "1#1"}}])
 
         with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
             mock_session.return_value.resource.return_value = ctx

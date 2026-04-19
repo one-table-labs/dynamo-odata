@@ -110,11 +110,13 @@ class TestGetAllAsyncWithSigning:
 
     def test_get_all_async_returns_signed_cursor(self):
         db = _make_db(cursor_secret="test-secret")
-        ctx = self._make_ctx({
-            "Items": [{"pk": "a"}],
-            "Count": 1,
-            "LastEvaluatedKey": {"PK": "TENANT#1", "SK": "1#USER#abc"},
-        })
+        ctx = self._make_ctx(
+            {
+                "Items": [{"pk": "a"}],
+                "Count": 1,
+                "LastEvaluatedKey": {"PK": "TENANT#1", "SK": "1#USER#abc"},
+            }
+        )
 
         with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
             mock_session.return_value.resource.return_value = ctx
