@@ -36,7 +36,7 @@ class TestGetAllSync:
         db = _make_db()
         db.table.query.return_value = {"Items": [], "Count": 0}
 
-        items, cursor = db.get_all("user::t1", active=None)
+        _, _ = db.get_all("user::t1", active=None)
 
         expr = db.table.query.call_args.kwargs["KeyConditionExpression"]
         assert isinstance(expr, ConditionBase)
@@ -67,7 +67,7 @@ class TestGetAllSync:
         from boto3.dynamodb.conditions import Attr
 
         expr = Attr("lsis1").eq("active")
-        items, cursor = db.get_all("user::t1", filter_expr=expr)
+        items, _ = db.get_all("user::t1", filter_expr=expr)
 
         kwargs = db.table.query.call_args.kwargs
         assert isinstance(kwargs["FilterExpression"], ConditionBase)
@@ -138,7 +138,7 @@ class TestGetAllAsync:
         ctx = self._make_ctx([{"Items": [{"pk": "a"}], "Count": 1}])
         with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
             mock_session.return_value.resource.return_value = ctx
-            items, cursor = asyncio.run(
+            items, _ = asyncio.run(
                 db.get_all_async("user::t1", filter_expr=Attr("lsis1").eq("active"))
             )
 

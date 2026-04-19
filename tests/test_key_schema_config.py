@@ -35,7 +35,7 @@ class TestUppercaseKeySchema:
             "Count": 1,
         }
 
-        items, cursor = db.get_all("TENANT#1")
+        items, _ = db.get_all("TENANT#1")
 
         expr = db.table.query.call_args.kwargs["KeyConditionExpression"]
         left, right = expr._values
