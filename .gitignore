@@ -5,3 +5,9 @@ __pycache__/
 plan/
 plan_complete/
 
+# Editor swap/backup files
+*.swp
+*.swo
+*.swx
+*~
+

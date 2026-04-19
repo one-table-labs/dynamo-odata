@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Attr, Key
+from boto3.dynamodb.conditions import Attr, ConditionBase, Key
 
 from .dynamo_filter import build_filter
 from .guardrails import FilterPolicy, PartitionKeyGuard
@@ -40,6 +44,7 @@ class DynamoDb:
         filter_policy: FilterPolicy | None = None,
         pk_separator: str = DEFAULT_PK_SEPARATOR,
         sk_separator: str = DEFAULT_SK_SEPARATOR,
+        cursor_secret: str | None = None,
     ) -> None:
         self.region = region or "us-west-2"
         self.db = resource or boto3.resource("dynamodb", region_name=self.region)
@@ -68,10 +73,41 @@ class DynamoDb:
         self.sk_separator = schema.sk_separator
         self.ACTIVE_PREFIX = schema.active_prefix
         self.INACTIVE_PREFIX = schema.inactive_prefix
+        self._cursor_secret: bytes | None = cursor_secret.encode() if cursor_secret else None
 
     @staticmethod
     def _now_iso() -> str:
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    def _encode_cursor(self, last_evaluated_key: dict[str, Any]) -> str:
+        """Encode a LastEvaluatedKey as an opaque cursor string.
+
+        When ``cursor_secret`` was provided at construction the payload is
+        HMAC-SHA256 signed, producing ``<b64payload>.<b64sig>``.  Without a
+        secret the cursor is plain base64 (backward-compatible default).
+        """
+        payload = base64.b64encode(json.dumps(last_evaluated_key).encode()).decode()
+        if self._cursor_secret is None:
+            return payload
+        sig = hmac.new(self._cursor_secret, payload.encode(), hashlib.sha256).digest()
+        return f"{payload}.{base64.b64encode(sig).decode()}"
+
+    def _decode_cursor(self, cursor: str) -> dict[str, Any]:
+        """Decode and (if signed) verify a pagination cursor.
+
+        Raises ``ValueError`` when a ``cursor_secret`` is configured and the
+        cursor signature does not match — indicating a tampered or invalid token.
+        """
+        if self._cursor_secret is not None:
+            parts = cursor.rsplit(".", 1)
+            if len(parts) != 2:
+                raise ValueError("Invalid pagination cursor: missing signature")
+            payload, sig_b64 = parts
+            expected = hmac.new(self._cursor_secret, payload.encode(), hashlib.sha256).digest()
+            if not hmac.compare_digest(base64.b64decode(sig_b64), expected):
+                raise ValueError("Invalid pagination cursor: signature mismatch")
+            return json.loads(base64.b64decode(payload.encode()).decode())
+        return json.loads(base64.b64decode(cursor.encode()).decode())
 
     def _get_aioboto3_session(self) -> Any:
         """Return the configured aioboto3 session, or a default one if none was provided."""
@@ -194,24 +230,33 @@ class DynamoDb:
         self,
         pk: str,
         filter: str | None = None,
+        filter_expr: ConditionBase | None = None,
         select: str | None = None,
-        limit: int = 1000,
+        limit: int = 25,
+        cursor: str | None = None,
         skip_token: dict[str, Any] | None = None,
         active: bool | None = True,
         next_link: str | None = None,
-        item_only: bool = False,
+        fetch_all: bool = False,
         sk_begins_with: str | None = None,
         lsi: bool | str = False,
         consistent_read: bool = False,
         scan_index_forward: bool = True,
-    ) -> dict[str, Any] | list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """Query a partition key and return ``(items, next_cursor)``.
+
+        Args:
+            fetch_all: When ``True``, auto-paginate through every DynamoDB page and
+                return all items with ``next_cursor=None``.  When ``False`` (default),
+                return at most ``limit`` items and a base64 cursor for the next page.
+            cursor: Opaque base64 pagination cursor from a previous call.  Mutually
+                exclusive with ``skip_token``.
+            skip_token: Raw ``LastEvaluatedKey`` dict (deprecated — use ``cursor``).
+        """
         self._validate_partition_key(pk)
         del next_link
-        requested_limit = limit
-        chunk_size = min(limit, 500) if limit != 1000 else 500
         params: dict[str, Any] = {
             "ReturnConsumedCapacity": "TOTAL",
-            "Limit": chunk_size,
             "ScanIndexForward": scan_index_forward,
         }
 
@@ -226,7 +271,7 @@ class DynamoDb:
             ).begins_with(sk_begins_with)
         elif active is None:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk)
-        elif active is True and pk != "tenants":
+        elif active is True:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk) & Key(
                 self.sort_key_name
             ).begins_with(self.ACTIVE_PREFIX)
@@ -237,8 +282,12 @@ class DynamoDb:
         else:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk)
 
+        effective_filter: ConditionBase | None = filter_expr
         if filter is not None:
-            params["FilterExpression"] = self._build_filter_expression(filter)
+            odata_expr = self._build_filter_expression(filter)
+            effective_filter = (odata_expr & filter_expr) if filter_expr is not None else odata_expr
+        if effective_filter is not None:
+            params["FilterExpression"] = effective_filter
 
         if select is not None:
             select_fields = [field.strip() for field in select.split(",") if field.strip()]
@@ -248,28 +297,38 @@ class DynamoDb:
                 if expr_attr_names:
                     params["ExpressionAttributeNames"] = expr_attr_names
 
-        if skip_token is not None:
-            params["ExclusiveStartKey"] = skip_token
+        start_key: dict[str, Any] | None = None
+        if cursor is not None:
+            start_key = self._decode_cursor(cursor)
+        elif skip_token is not None:
+            start_key = skip_token
+        if start_key is not None:
+            params["ExclusiveStartKey"] = start_key
 
         items: list[dict[str, Any]] = []
-        last_evaluated_key: Any = True
-        while last_evaluated_key is not None:
-            if len(items) >= requested_limit and requested_limit != 1000:
-                break
-            result = self.table.query(**params)
-            self.add_consumed_capacity(result.get("ConsumedCapacity"))
-            items.extend(result.get("Items", []))
-            last_evaluated_key = result.get("LastEvaluatedKey")
-            if last_evaluated_key is not None:
-                params["ExclusiveStartKey"] = last_evaluated_key
-            else:
-                params.pop("ExclusiveStartKey", None)
 
-        if requested_limit != 1000 and len(items) > requested_limit:
-            items = items[:requested_limit]
+        if fetch_all:
+            params["Limit"] = 500
+            last_key: Any = True
+            while last_key is not None:
+                result = self.table.query(**params)
+                self.add_consumed_capacity(result.get("ConsumedCapacity"))
+                items.extend(result.get("Items", []))
+                last_key = result.get("LastEvaluatedKey")
+                if last_key:
+                    params["ExclusiveStartKey"] = last_key
+                else:
+                    params.pop("ExclusiveStartKey", None)
+            return items, None
 
-        response = {"Items": items, "Count": len(items)}
-        return response["Items"] if item_only else response
+        params["Limit"] = limit
+        result = self.table.query(**params)
+        self.add_consumed_capacity(result.get("ConsumedCapacity"))
+        items = result.get("Items", [])
+        next_cursor: str | None = None
+        if last_evaluated := result.get("LastEvaluatedKey"):
+            next_cursor = self._encode_cursor(last_evaluated)
+        return items, next_cursor
 
     def batch_get(
         self,
@@ -411,24 +470,24 @@ class DynamoDb:
         self,
         pk: str,
         filter: str | None = None,
+        filter_expr: ConditionBase | None = None,
         select: str | None = None,
-        limit: int = 1000,
+        limit: int = 25,
+        cursor: str | None = None,
         skip_token: dict[str, Any] | None = None,
         active: bool | None = True,
         next_link: str | None = None,
-        item_only: bool = False,
+        fetch_all: bool = False,
         sk_begins_with: str | None = None,
         lsi: bool | str = False,
         consistent_read: bool = False,
         scan_index_forward: bool = True,
-    ) -> dict[str, Any] | list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """Async version of :meth:`get_all`. Returns ``(items, next_cursor)``."""
         self._validate_partition_key(pk)
         del next_link
-        requested_limit = limit
-        chunk_size = min(limit, 500) if limit != 1000 else 500
         params: dict[str, Any] = {
             "ReturnConsumedCapacity": "TOTAL",
-            "Limit": chunk_size,
             "ScanIndexForward": scan_index_forward,
         }
 
@@ -443,7 +502,7 @@ class DynamoDb:
             ).begins_with(sk_begins_with)
         elif active is None:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk)
-        elif active is True and pk != "tenants":
+        elif active is True:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk) & Key(
                 self.sort_key_name
             ).begins_with(self.ACTIVE_PREFIX)
@@ -454,8 +513,12 @@ class DynamoDb:
         else:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk)
 
+        effective_filter: ConditionBase | None = filter_expr
         if filter is not None:
-            params["FilterExpression"] = self._build_filter_expression(filter)
+            odata_expr = self._build_filter_expression(filter)
+            effective_filter = (odata_expr & filter_expr) if filter_expr is not None else odata_expr
+        if effective_filter is not None:
+            params["FilterExpression"] = effective_filter
 
         if select is not None:
             select_fields = [field.strip() for field in select.split(",") if field.strip()]
@@ -465,31 +528,41 @@ class DynamoDb:
                 if expr_attr_names:
                     params["ExpressionAttributeNames"] = expr_attr_names
 
-        if skip_token is not None:
-            params["ExclusiveStartKey"] = skip_token
+        start_key: dict[str, Any] | None = None
+        if cursor is not None:
+            start_key = self._decode_cursor(cursor)
+        elif skip_token is not None:
+            start_key = skip_token
+        if start_key is not None:
+            params["ExclusiveStartKey"] = start_key
 
         items: list[dict[str, Any]] = []
-        last_evaluated_key: Any = True
         session = self._get_aioboto3_session()
         async with session.resource("dynamodb", region_name=self.region) as resource:
             table = await resource.Table(self.table.name)
-            while last_evaluated_key is not None:
-                if len(items) >= requested_limit and requested_limit != 1000:
-                    break
-                result = await table.query(**params)
-                self.add_consumed_capacity(result.get("ConsumedCapacity"))
-                items.extend(result.get("Items", []))
-                last_evaluated_key = result.get("LastEvaluatedKey")
-                if last_evaluated_key is not None:
-                    params["ExclusiveStartKey"] = last_evaluated_key
-                else:
-                    params.pop("ExclusiveStartKey", None)
 
-        if requested_limit != 1000 and len(items) > requested_limit:
-            items = items[:requested_limit]
+            if fetch_all:
+                params["Limit"] = 500
+                last_key: Any = True
+                while last_key is not None:
+                    result = await table.query(**params)
+                    self.add_consumed_capacity(result.get("ConsumedCapacity"))
+                    items.extend(result.get("Items", []))
+                    last_key = result.get("LastEvaluatedKey")
+                    if last_key:
+                        params["ExclusiveStartKey"] = last_key
+                    else:
+                        params.pop("ExclusiveStartKey", None)
+                return items, None
 
-        response = {"Items": items, "Count": len(items)}
-        return response["Items"] if item_only else response
+            params["Limit"] = limit
+            result = await table.query(**params)
+            self.add_consumed_capacity(result.get("ConsumedCapacity"))
+            items = result.get("Items", [])
+            next_cursor: str | None = None
+            if last_evaluated := result.get("LastEvaluatedKey"):
+                next_cursor = self._encode_cursor(last_evaluated)
+            return items, next_cursor
 
     def put(
         self,
@@ -962,6 +1035,14 @@ class DynamoDb:
     async def hard_delete_async(self, pk: str, sk: str) -> dict[str, Any]:
         return await self.delete_async(pk=pk, sk=sk, is_purge=True)
 
+    def delete_item(self, pk: str, sk: str) -> dict[str, Any]:
+        """Alias for :meth:`hard_delete`. Permanently removes an item."""
+        return self.hard_delete(pk, sk)
+
+    async def delete_item_async(self, pk: str, sk: str) -> dict[str, Any]:
+        """Alias for :meth:`hard_delete_async`. Permanently removes an item."""
+        return await self.hard_delete_async(pk, sk)
+
     def restore(self, pk: str, sk_body: str, restore_data: dict[str, Any] | None = None) -> dict[str, Any]:
         """
         Restore a soft-deleted item: atomically swaps SK from 0# → 1#.
@@ -1099,10 +1180,7 @@ class DynamoDb:
             params["FilterExpression"] = effective_filter
 
         if cursor is not None:
-            import base64
-            import json
-
-            params["ExclusiveStartKey"] = json.loads(base64.b64decode(cursor.encode()).decode())
+            params["ExclusiveStartKey"] = self._decode_cursor(cursor)
 
         response = self.table.query(**params)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
@@ -1110,10 +1188,7 @@ class DynamoDb:
 
         next_cursor: str | None = None
         if last_key := response.get("LastEvaluatedKey"):
-            import base64
-            import json
-
-            next_cursor = base64.b64encode(json.dumps(last_key).encode()).decode()
+            next_cursor = self._encode_cursor(last_key)
 
         return items, next_cursor
 
@@ -1160,10 +1235,7 @@ class DynamoDb:
             params["FilterExpression"] = effective_filter
 
         if cursor is not None:
-            import base64
-            import json
-
-            params["ExclusiveStartKey"] = json.loads(base64.b64decode(cursor.encode()).decode())
+            params["ExclusiveStartKey"] = self._decode_cursor(cursor)
 
         session = self._get_aioboto3_session()
         async with session.resource("dynamodb", region_name=self.region) as resource:
@@ -1174,10 +1246,7 @@ class DynamoDb:
 
         next_cursor: str | None = None
         if last_key := response.get("LastEvaluatedKey"):
-            import base64
-            import json
-
-            next_cursor = base64.b64encode(json.dumps(last_key).encode()).decode()
+            next_cursor = self._encode_cursor(last_key)
 
         return items, next_cursor
 
@@ -1240,7 +1309,11 @@ class DynamoDb:
             typed_ops.append(typed_op)
 
         session = self._get_aioboto3_session()
-        async with session.client("dynamodb", region_name=self.region) as client:
+        client_kwargs: dict[str, Any] = {"region_name": self.region}
+        endpoint_url = getattr(self.table.meta.client.meta, "endpoint_url", None)
+        if endpoint_url:
+            client_kwargs["endpoint_url"] = endpoint_url
+        async with session.client("dynamodb", **client_kwargs) as client:
             await client.transact_write_items(TransactItems=typed_ops)
 
     def scan_all_paginated(

@@ -35,13 +35,13 @@ class TestUppercaseKeySchema:
             "Count": 1,
         }
 
-        result = db.get_all("TENANT#1", item_only=True)
+        items, _ = db.get_all("TENANT#1")
 
         expr = db.table.query.call_args.kwargs["KeyConditionExpression"]
         left, right = expr._values
         assert left._values[0].name == "PK"
         assert right._values[0].name == "SK"
-        assert result == [{"PK": "TENANT#1", "SK": "1#USER#1"}]
+        assert items == [{"PK": "TENANT#1", "SK": "1#USER#1"}]
 
     def test_batch_get_uses_uppercase_keys(self):
         db = _make_db()

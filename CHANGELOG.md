@@ -4,6 +4,70 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-04-19
+
+### Added
+
+- `cursor_secret: str | None` constructor parameter.  When provided, all pagination
+  cursors are HMAC-SHA256 signed: `<b64payload>.<b64sig>`.  Cursors produced by one
+  instance can only be decoded by an instance with the same secret; a mismatched or
+  truncated signature raises `ValueError("Invalid pagination cursor: …")`.
+  Without a secret the cursor is plain base64 (default, backward-compatible).
+- `_encode_cursor` / `_decode_cursor` helper methods replace six previously inline
+  `base64 / json` call sites across `get_all`, `get_all_async`, `query_gsi`, and
+  `query_gsi_async`.  Signing is applied consistently across all paginated methods.
+
+---
+
+## [0.6.0] - 2026-04-19
+
+### Changed
+
+- **Breaking:** `get_all` / `get_all_async` now return `tuple[list[dict], str | None]` — a list of
+  items and an opaque base64 cursor (or `None` when there are no more pages).
+  Previously returned `dict | list` depending on `item_only`, requiring callers to branch on the
+  type in every call site. The `item_only` parameter has been removed.
+- `limit` default changed from `1000` to `25`; callers that relied on the implicit
+  "fetch everything in one shot" behavior should pass `fetch_all=True` instead.
+
+### Added
+
+- `fetch_all: bool = False` parameter on `get_all` / `get_all_async`.
+  When `True`, the method auto-paginates through all DynamoDB pages (in chunks of 500) and
+  returns `(all_items, None)`. Replaces the previous unlimited-by-default behaviour.
+- `cursor: str | None = None` parameter on `get_all` / `get_all_async` — opaque base64-encoded
+  `LastEvaluatedKey`, matching the cursor convention already used by `query_gsi` / `query_gsi_async`.
+  Callers can now use a single consistent cursor pattern across all paginated methods.
+- `sk_begins_with`, `lsi`, `consistent_read`, `scan_index_forward` parameters exposed on
+  `get_all` / `get_all_async` for callers that previously needed workarounds.
+
+### Removed
+
+- `item_only` parameter from `get_all` / `get_all_async` (items are always returned directly).
+- Hardcoded `pk != "tenants"` special-case branch — callers control prefix logic via `active`.
+
+---
+
+## [0.5.2] - 2026-04-19
+
+### Added
+
+- `get_all` / `get_all_async` now accept `filter_expr: ConditionBase | None` — a
+  pre-built boto3 condition that is AND-merged with any OData `filter` string.
+  Previously there was no way to pass a boto3 condition to a PK-scoped query; callers
+  had to work around this with `query_gsi_async` even when they only needed a simple
+  partition-key scan with a compound filter.
+- `delete_item(pk, sk)` and `delete_item_async(pk, sk)` convenience aliases for
+  `hard_delete` / `hard_delete_async`. Eliminates `AttributeError` crashes in callers
+  that used the intuitive name.
+
+### Fixed
+
+- `transact_write_async` now forwards `endpoint_url` to the aioboto3 client, matching
+  the behaviour of the sync `transact_write`. Previously, `restore_async` (which calls
+  `transact_write_async`) would connect to the real AWS endpoint instead of
+  DynamoDB Local or moto in local-dev and test environments.
+
 ## [0.5.1] - 2026-04-17
 
 ### Fixed
