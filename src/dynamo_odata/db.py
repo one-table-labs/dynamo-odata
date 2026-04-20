@@ -883,9 +883,7 @@ class DynamoDb:
         retry_delay = 0.0
         while pending:
             chunk, pending = pending[:25], pending[25:]
-            request_items: dict[str, Any] = {
-                table_name: [{"DeleteRequest": {"Key": k}} for k in chunk]
-            }
+            request_items: dict[str, Any] = {table_name: [{"DeleteRequest": {"Key": k}} for k in chunk]}
             response = self.db.batch_write_item(
                 RequestItems=request_items,
                 ReturnConsumedCapacity="TOTAL",
@@ -907,9 +905,7 @@ class DynamoDb:
         async with self._async_resource() as resource:
             while pending:
                 chunk, pending = pending[:25], pending[25:]
-                request_items: dict[str, Any] = {
-                    table_name: [{"DeleteRequest": {"Key": k}} for k in chunk]
-                }
+                request_items: dict[str, Any] = {table_name: [{"DeleteRequest": {"Key": k}} for k in chunk]}
                 response = await resource.batch_write_item(
                     RequestItems=request_items,
                     ReturnConsumedCapacity="TOTAL",
