@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
 import json
+import time
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -74,6 +77,8 @@ class DynamoDb:
         self.ACTIVE_PREFIX = schema.active_prefix
         self.INACTIVE_PREFIX = schema.inactive_prefix
         self._cursor_secret: bytes | None = cursor_secret.encode() if cursor_secret else None
+        self._shared_resource: Any = None
+        self._resource_cm: Any = None
 
     @staticmethod
     def _now_iso() -> str:
@@ -112,6 +117,28 @@ class DynamoDb:
     def _get_aioboto3_session(self) -> Any:
         """Return the configured aioboto3 session, or a default one if none was provided."""
         return _get_aioboto3_session(self._async_session)
+
+    @asynccontextmanager
+    async def _async_resource(self):
+        """Yield a DynamoDB async resource, reusing the shared one when available."""
+        if self._shared_resource is not None:
+            yield self._shared_resource
+        else:
+            session = self._get_aioboto3_session()
+            async with session.resource("dynamodb", region_name=self.region) as resource:
+                yield resource
+
+    async def __aenter__(self) -> DynamoDb:
+        session = self._get_aioboto3_session()
+        self._resource_cm = session.resource("dynamodb", region_name=self.region)
+        self._shared_resource = await self._resource_cm.__aenter__()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        if self._resource_cm is not None:
+            await self._resource_cm.__aexit__(exc_type, exc_val, exc_tb)
+            self._resource_cm = None
+            self._shared_resource = None
 
     def add_consumed_capacity(self, consumed_capacity: Any) -> None:
         if not consumed_capacity:
@@ -357,6 +384,7 @@ class DynamoDb:
         batch_chunk = 100
         all_items: list[dict[str, Any]] = []
         pending_keys = keys
+        retry_delay = 0.0
 
         while pending_keys:
             chunk, pending_keys = pending_keys[:batch_chunk], pending_keys[batch_chunk:]
@@ -370,7 +398,11 @@ class DynamoDb:
 
             unprocessed = response.get("UnprocessedKeys", {})
             if unprocessed and table_name in unprocessed:
+                retry_delay = min(retry_delay * 2 if retry_delay else 0.05, 1.0)
+                time.sleep(retry_delay)
                 pending_keys = unprocessed[table_name]["Keys"] + pending_keys
+            else:
+                retry_delay = 0.0
 
         if item_only:
             return all_items
@@ -388,7 +420,6 @@ class DynamoDb:
         if not sks:
             return []
 
-        session = self._get_aioboto3_session()
         table_name = self.table.name
         keys = self._normalize_sks(pk, sks)
 
@@ -405,8 +436,9 @@ class DynamoDb:
         batch_chunk = 100
         all_items: list[dict[str, Any]] = []
         pending_keys = keys
+        retry_delay = 0.0
 
-        async with session.resource("dynamodb", region_name=self.region) as resource:
+        async with self._async_resource() as resource:
             while pending_keys:
                 chunk, pending_keys = (
                     pending_keys[:batch_chunk],
@@ -422,7 +454,11 @@ class DynamoDb:
 
                 unprocessed = response.get("UnprocessedKeys", {})
                 if unprocessed and table_name in unprocessed:
+                    retry_delay = min(retry_delay * 2 if retry_delay else 0.05, 1.0)
+                    await asyncio.sleep(retry_delay)
                     pending_keys = unprocessed[table_name]["Keys"] + pending_keys
+                else:
+                    retry_delay = 0.0
 
         if item_only:
             return all_items
@@ -456,8 +492,7 @@ class DynamoDb:
                 if expr_attr_names:
                     params["ExpressionAttributeNames"] = expr_attr_names
 
-        session = self._get_aioboto3_session()
-        async with session.resource("dynamodb", region_name=self.region) as resource:
+        async with self._async_resource() as resource:
             table = await resource.Table(self.table.name)
             response = await table.get_item(**params)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
@@ -537,8 +572,7 @@ class DynamoDb:
             params["ExclusiveStartKey"] = start_key
 
         items: list[dict[str, Any]] = []
-        session = self._get_aioboto3_session()
-        async with session.resource("dynamodb", region_name=self.region) as resource:
+        async with self._async_resource() as resource:
             table = await resource.Table(self.table.name)
 
             if fetch_all:
@@ -680,8 +714,7 @@ class DynamoDb:
         if expression_attribute_names:
             params["ExpressionAttributeNames"] = expression_attribute_names
 
-        session = self._get_aioboto3_session()
-        async with session.resource("dynamodb", region_name=self.region) as resource:
+        async with self._async_resource() as resource:
             table = await resource.Table(self.table.name)
             response = await table.update_item(**params)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
@@ -718,8 +751,7 @@ class DynamoDb:
         body = self._convert_to_decimal(dict(item))
         body = self._strip_key_attributes(body)
         full_item = {self.partition_key_name: pk, self.sort_key_name: sk, **body}
-        session = self._get_aioboto3_session()
-        async with session.resource("dynamodb", region_name=self.region) as resource:
+        async with self._async_resource() as resource:
             table = await resource.Table(self.table.name)
             await table.put_item(Item=full_item, ReturnConsumedCapacity="TOTAL")
 
@@ -760,8 +792,7 @@ class DynamoDb:
         body = self._convert_to_decimal(dict(item))
         body = self._strip_key_attributes(body)
         full_item = {self.partition_key_name: pk, self.sort_key_name: sk, **body}
-        session = self._get_aioboto3_session()
-        async with session.resource("dynamodb", region_name=self.region) as resource:
+        async with self._async_resource() as resource:
             table = await resource.Table(self.table.name)
             await table.put_item(
                 Item=full_item,
@@ -839,12 +870,54 @@ class DynamoDb:
             "ReturnValues": "ALL_NEW",
             "ReturnConsumedCapacity": "TOTAL",
         }
-        session = self._get_aioboto3_session()
-        async with session.resource("dynamodb", region_name=self.region) as resource:
+        async with self._async_resource() as resource:
             table = await resource.Table(self.table.name)
             response = await table.update_item(**params)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
         return response.get("Attributes", {})
+
+    def _batch_purge_keys(self, keys: list[dict[str, str]]) -> None:
+        """Delete a list of (pk, sk) key dicts using batch_write_item with backoff."""
+        table_name = self.table.name
+        pending = list(keys)
+        retry_delay = 0.0
+        while pending:
+            chunk, pending = pending[:25], pending[25:]
+            request_items: dict[str, Any] = {table_name: [{"DeleteRequest": {"Key": k}} for k in chunk]}
+            response = self.db.batch_write_item(
+                RequestItems=request_items,
+                ReturnConsumedCapacity="TOTAL",
+            )
+            self.add_consumed_capacity(response.get("ConsumedCapacity"))
+            unprocessed = response.get("UnprocessedItems", {}).get(table_name, [])
+            if unprocessed:
+                retry_delay = min(retry_delay * 2 if retry_delay else 0.05, 1.0)
+                time.sleep(retry_delay)
+                pending = [req["DeleteRequest"]["Key"] for req in unprocessed] + pending
+            else:
+                retry_delay = 0.0
+
+    async def _batch_purge_keys_async(self, keys: list[dict[str, str]]) -> None:
+        """Async version of _batch_purge_keys."""
+        table_name = self.table.name
+        pending = list(keys)
+        retry_delay = 0.0
+        async with self._async_resource() as resource:
+            while pending:
+                chunk, pending = pending[:25], pending[25:]
+                request_items: dict[str, Any] = {table_name: [{"DeleteRequest": {"Key": k}} for k in chunk]}
+                response = await resource.batch_write_item(
+                    RequestItems=request_items,
+                    ReturnConsumedCapacity="TOTAL",
+                )
+                self.add_consumed_capacity(response.get("ConsumedCapacity"))
+                unprocessed = response.get("UnprocessedItems", {}).get(table_name, [])
+                if unprocessed:
+                    retry_delay = min(retry_delay * 2 if retry_delay else 0.05, 1.0)
+                    await asyncio.sleep(retry_delay)
+                    pending = [req["DeleteRequest"]["Key"] for req in unprocessed] + pending
+                else:
+                    retry_delay = 0.0
 
     def delete(
         self,
@@ -859,26 +932,27 @@ class DynamoDb:
         delete_data = {} if delete_data is None else delete_data
 
         if sk_begins_with is not None:
-            items = self.get_all(
+            items, _ = self.get_all(
                 pk=pk,
                 sk_begins_with=sk_begins_with,
-                select=f"{self.partition_key_name},{self.sort_key_name}",
-                item_only=True,
+                select=f"{self.partition_key_name},{self.sort_key_name}" if is_purge else None,
+                fetch_all=True,
                 active=None,
             )
             if limit is not None:
                 items = items[:limit]
+
+            if is_purge:
+                keys = [self._key_dict(item[self.partition_key_name], item[self.sort_key_name]) for item in items]
+                self._batch_purge_keys(keys)
+                return {"deleted_count": len(keys), "failed_count": 0, "items_processed": len(keys)}
+
             deleted_count = 0
             failed_count = 0
             failed_items = []
             for item in items:
                 try:
-                    self.delete(
-                        pk=item[self.partition_key_name],
-                        sk=item[self.sort_key_name],
-                        is_purge=is_purge,
-                        delete_data=delete_data,
-                    )
+                    self._soft_delete_record(item, delete_data)
                     deleted_count += 1
                 except Exception as exc:
                     failed_count += 1
@@ -913,12 +987,16 @@ class DynamoDb:
         current_record = self.get(pk=pk, sk=sk, item_only=True)
         if current_record is None:
             return {"warning": "Record does not exist"}
+        return self._soft_delete_record(current_record, delete_data)
 
-        active = self.is_active_sk(current_record[self.sort_key_name])
+    def _soft_delete_record(self, current_record: dict[str, Any], delete_data: dict[str, Any]) -> dict[str, Any]:
+        pk = current_record[self.partition_key_name]
+        sk = current_record[self.sort_key_name]
+        active = self.is_active_sk(sk)
         if active:
             new_record = current_record.copy()
             new_record["active"] = False
-            new_sk = self.build_inactive_sk(current_record[self.sort_key_name])
+            new_sk = self.build_inactive_sk(sk)
             for key, value in delete_data.items():
                 if key not in [self.partition_key_name, self.sort_key_name]:
                     new_record[key] = value
@@ -929,6 +1007,31 @@ class DynamoDb:
             ReturnValues="ALL_OLD",
             ReturnConsumedCapacity="TOTAL",
         )
+        self.add_consumed_capacity(response.get("ConsumedCapacity"))
+        return response
+
+    async def _soft_delete_record_async(
+        self, current_record: dict[str, Any], delete_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        pk = current_record[self.partition_key_name]
+        sk = current_record[self.sort_key_name]
+        active = self.is_active_sk(sk)
+        if active:
+            new_record = current_record.copy()
+            new_record["active"] = False
+            new_sk = self.build_inactive_sk(sk)
+            for key, value in delete_data.items():
+                if key not in [self.partition_key_name, self.sort_key_name]:
+                    new_record[key] = value
+            await self.put_async(pk=pk, sk=new_sk, data=new_record)
+
+        async with self._async_resource() as resource:
+            table = await resource.Table(self.table.name)
+            response = await table.delete_item(
+                Key=self._key_dict(pk, sk),
+                ReturnValues="ALL_OLD",
+                ReturnConsumedCapacity="TOTAL",
+            )
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
         return response
 
@@ -945,39 +1048,44 @@ class DynamoDb:
         delete_data = {} if delete_data is None else delete_data
 
         if sk_begins_with is not None:
-            items = await self.get_all_async(
+            items, _ = await self.get_all_async(
                 pk=pk,
                 sk_begins_with=sk_begins_with,
-                select=f"{self.partition_key_name},{self.sort_key_name}",
-                item_only=True,
+                select=f"{self.partition_key_name},{self.sort_key_name}" if is_purge else None,
+                fetch_all=True,
                 active=None,
             )
             if limit is not None:
                 items = items[:limit]
-            deleted_count = 0
-            failed_count = 0
-            failed_items = []
-            for item in items:
-                try:
-                    await self.delete_async(
-                        pk=item[self.partition_key_name],
-                        sk=item[self.sort_key_name],
-                        is_purge=is_purge,
-                        delete_data=delete_data,
-                    )
-                    deleted_count += 1
-                except Exception as exc:
-                    failed_count += 1
-                    failed_items.append(
-                        {
-                            self.partition_key_name: item[self.partition_key_name],
-                            self.sort_key_name: item[self.sort_key_name],
-                            "error": str(exc),
-                        }
-                    )
+
+            if is_purge:
+                keys = [self._key_dict(item[self.partition_key_name], item[self.sort_key_name]) for item in items]
+                await self._batch_purge_keys_async(keys)
+                return {"deleted_count": len(keys), "failed_count": 0, "items_processed": len(keys)}
+
+            semaphore = asyncio.Semaphore(20)
+            failed_items: list[dict[str, Any]] = []
+
+            async def _delete_one(item: dict[str, Any]) -> bool:
+                async with semaphore:
+                    try:
+                        await self._soft_delete_record_async(item, delete_data)
+                        return True
+                    except Exception as exc:
+                        failed_items.append(
+                            {
+                                self.partition_key_name: item[self.partition_key_name],
+                                self.sort_key_name: item[self.sort_key_name],
+                                "error": str(exc),
+                            }
+                        )
+                        return False
+
+            results = await asyncio.gather(*[_delete_one(item) for item in items])
+            deleted_count = sum(1 for ok in results if ok)
             result: dict[str, Any] = {
                 "deleted_count": deleted_count,
-                "failed_count": failed_count,
+                "failed_count": len(failed_items),
                 "items_processed": len(items),
             }
             if failed_items:
@@ -987,9 +1095,8 @@ class DynamoDb:
         if sk is None:
             raise ValueError("Either sk or sk_begins_with must be provided")
 
-        session = self._get_aioboto3_session()
         if is_purge:
-            async with session.resource("dynamodb", region_name=self.region) as resource:
+            async with self._async_resource() as resource:
                 table = await resource.Table(self.table.name)
                 response = await table.delete_item(
                     Key=self._key_dict(pk, sk),
@@ -1002,26 +1109,7 @@ class DynamoDb:
         current_record = await self.get_async(pk=pk, sk=sk, item_only=True)
         if current_record is None:
             return {"warning": "Record does not exist"}
-
-        active = self.is_active_sk(current_record[self.sort_key_name])
-        if active:
-            new_record = current_record.copy()
-            new_record["active"] = False
-            new_sk = self.build_inactive_sk(current_record[self.sort_key_name])
-            for key, value in delete_data.items():
-                if key not in [self.partition_key_name, self.sort_key_name]:
-                    new_record[key] = value
-            await self.put_async(pk=pk, sk=new_sk, data=new_record)
-
-        async with session.resource("dynamodb", region_name=self.region) as resource:
-            table = await resource.Table(self.table.name)
-            response = await table.delete_item(
-                Key=self._key_dict(pk, sk),
-                ReturnValues="ALL_OLD",
-                ReturnConsumedCapacity="TOTAL",
-            )
-        self.add_consumed_capacity(response.get("ConsumedCapacity"))
-        return response
+        return await self._soft_delete_record_async(current_record, delete_data)
 
     def soft_delete(self, pk: str, sk: str, delete_data: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.delete(pk=pk, sk=sk, is_purge=False, delete_data=delete_data)
@@ -1237,8 +1325,7 @@ class DynamoDb:
         if cursor is not None:
             params["ExclusiveStartKey"] = self._decode_cursor(cursor)
 
-        session = self._get_aioboto3_session()
-        async with session.resource("dynamodb", region_name=self.region) as resource:
+        async with self._async_resource() as resource:
             table = await resource.Table(self.table.name)
             response = await table.query(**params)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
@@ -1273,15 +1360,7 @@ class DynamoDb:
         if len(operations) > 25:
             raise ValueError(f"transact_write supports up to 25 operations, got {len(operations)}")
 
-        import boto3 as _boto3
-
-        client_kwargs: dict[str, Any] = {"region_name": self.region}
-        # Support local endpoint override (e.g. DynamoDB Local in tests)
-        endpoint_url = getattr(self.table.meta.client.meta, "endpoint_url", None)
-        if endpoint_url:
-            client_kwargs["endpoint_url"] = endpoint_url
-
-        client = _boto3.client("dynamodb", **client_kwargs)
+        client = self.table.meta.client
         table_name = self.table.name
 
         typed_ops = []
@@ -1313,8 +1392,8 @@ class DynamoDb:
         endpoint_url = getattr(self.table.meta.client.meta, "endpoint_url", None)
         if endpoint_url:
             client_kwargs["endpoint_url"] = endpoint_url
-        async with session.client("dynamodb", **client_kwargs) as client:
-            await client.transact_write_items(TransactItems=typed_ops)
+        async with session.client("dynamodb", **client_kwargs) as async_client:
+            await async_client.transact_write_items(TransactItems=typed_ops)
 
     def scan_all_paginated(
         self,
@@ -1382,8 +1461,7 @@ class DynamoDb:
         if skip_token is not None:
             params["ExclusiveStartKey"] = skip_token
 
-        session = self._get_aioboto3_session()
-        async with session.resource("dynamodb", region_name=self.region) as resource:
+        async with self._async_resource() as resource:
             table = await resource.Table(self.table.name)
             response = await table.scan(**params)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))

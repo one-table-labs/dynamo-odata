@@ -42,15 +42,30 @@ class TestDeleteSync:
         assert put_kwargs["data"]["deleted_reason"] == "test"
         db.table.delete_item.assert_called_once()
 
-    def test_batch_delete_uses_get_all(self):
+    def test_batch_delete_purge_uses_batch_write_item(self):
         db = _make_db()
-        db.get_all = MagicMock(return_value=[{"pk": "a", "sk": "1#x"}, {"pk": "a", "sk": "1#y"}])
-        db.delete = MagicMock(return_value={})
+        items = [{"pk": "a", "sk": "1#x"}, {"pk": "a", "sk": "1#y"}]
+        db.get_all = MagicMock(return_value=(items, None))
+        db.db.batch_write_item = MagicMock(return_value={"UnprocessedItems": {}})
 
-        result = DynamoDb.delete(db, "a", sk_begins_with="1#", is_purge=True)
+        result = db.delete("a", sk_begins_with="1#", is_purge=True)
 
         assert result["deleted_count"] == 2
         assert result["failed_count"] == 0
+        db.db.batch_write_item.assert_called_once()
+
+    def test_batch_delete_soft_uses_get_all_items(self):
+        db = _make_db()
+        items = [{"pk": "a", "sk": "1#x", "name": "X"}, {"pk": "a", "sk": "1#y", "name": "Y"}]
+        db.get_all = MagicMock(return_value=(items, None))
+        db.table.delete_item.return_value = {"Attributes": {}}
+        db.put = MagicMock(return_value={})
+
+        result = db.delete("a", sk_begins_with="1#", is_purge=False)
+
+        assert result["deleted_count"] == 2
+        assert result["failed_count"] == 0
+        assert db.put.call_count == 2
 
     def test_soft_delete_moves_to_inactive_with_custom_separator(self):
         db = _make_db()
