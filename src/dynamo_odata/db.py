@@ -128,7 +128,7 @@ class DynamoDb:
             async with session.resource("dynamodb", region_name=self.region) as resource:
                 yield resource
 
-    async def __aenter__(self) -> "DynamoDb":
+    async def __aenter__(self) -> DynamoDb:
         session = self._get_aioboto3_session()
         self._resource_cm = session.resource("dynamodb", region_name=self.region)
         self._shared_resource = await self._resource_cm.__aenter__()
@@ -1014,7 +1014,9 @@ class DynamoDb:
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
         return response
 
-    async def _soft_delete_record_async(self, current_record: dict[str, Any], delete_data: dict[str, Any]) -> dict[str, Any]:
+    async def _soft_delete_record_async(
+        self, current_record: dict[str, Any], delete_data: dict[str, Any]
+    ) -> dict[str, Any]:
         pk = current_record[self.partition_key_name]
         sk = current_record[self.sort_key_name]
         active = self.is_active_sk(sk)
