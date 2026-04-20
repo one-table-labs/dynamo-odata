@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dynamo-odata"
-version = "0.6.1"
+version = "0.7.0"
 description = "OData filter and projection helpers for AWS DynamoDB"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -97,3 +97,14 @@ warn_unused_ignores = true
 [[tool.mypy.overrides]]
 module = ["dynamo_odata.db", "dynamo_odata.odata_query.*"]
 ignore_errors = true
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+tag_format = "v{version}"
+major_on_zero = false
+commit_message = "chore: release v{version}"
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = ["feat", "fix", "perf", "refactor", "docs", "style", "test", "chore", "ci", "build"]
+minor_tags = ["feat", "perf"]
+patch_tags = ["fix", "refactor"]
