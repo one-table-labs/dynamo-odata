@@ -74,20 +74,21 @@ class TestUppercaseKeySchema:
 
     def test_delete_with_prefix_uses_uppercase_item_keys(self):
         db = _make_db()
-        db.get_all = MagicMock(
-            return_value=[
-                {"PK": "TENANT#1", "SK": "1#USER#1"},
-                {"PK": "TENANT#1", "SK": "1#USER#2"},
-            ]
-        )
-        db.delete = MagicMock(return_value={})
+        items = [
+            {"PK": "TENANT#1", "SK": "1#USER#1"},
+            {"PK": "TENANT#1", "SK": "1#USER#2"},
+        ]
+        db.get_all = MagicMock(return_value=(items, None))
+        db.db.batch_write_item = MagicMock(return_value={"UnprocessedItems": {}})
 
-        result = DynamoDb.delete(db, "TENANT#1", sk_begins_with="1#", is_purge=True)
+        result = db.delete("TENANT#1", sk_begins_with="1#", is_purge=True)
 
         assert result["deleted_count"] == 2
-        first_call = db.delete.call_args_list[0].kwargs
-        assert first_call["pk"] == "TENANT#1"
-        assert first_call["sk"] == "1#USER#1"
+        call_kwargs = db.db.batch_write_item.call_args.kwargs
+        delete_requests = call_kwargs["RequestItems"]["table_dev"]
+        keys = [req["DeleteRequest"]["Key"] for req in delete_requests]
+        assert {"PK": "TENANT#1", "SK": "1#USER#1"} in keys
+        assert {"PK": "TENANT#1", "SK": "1#USER#2"} in keys
 
     def test_soft_delete_reads_uppercase_sort_key(self):
         db = _make_db()

@@ -184,18 +184,15 @@ class TestQueryGsiAsync:
 class TestTransactWrite:
     def test_transact_write_injects_table_name(self):
         db = _make_db()
-        db.table.meta.client.meta.endpoint_url = None
-        mock_client = MagicMock()
 
-        with patch("dynamo_odata.db.boto3.client", return_value=mock_client):
-            db.transact_write(
-                [
-                    {"Put": {"Item": {"PK": "T#1", "SK": "1#U#a"}}},
-                    {"Delete": {"Key": {"PK": "T#1", "SK": "0#U#a"}}},
-                ]
-            )
+        db.transact_write(
+            [
+                {"Put": {"Item": {"PK": "T#1", "SK": "1#U#a"}}},
+                {"Delete": {"Key": {"PK": "T#1", "SK": "0#U#a"}}},
+            ]
+        )
 
-        call_args = mock_client.transact_write_items.call_args
+        call_args = db.table.meta.client.transact_write_items.call_args
         ops = call_args.kwargs["TransactItems"]
         assert ops[0]["Put"]["TableName"] == "test-table"
         assert ops[1]["Delete"]["TableName"] == "test-table"
