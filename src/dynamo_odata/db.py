@@ -48,10 +48,12 @@ class DynamoDb:
         pk_separator: str = DEFAULT_PK_SEPARATOR,
         sk_separator: str = DEFAULT_SK_SEPARATOR,
         cursor_secret: str | None = None,
+        endpoint_url: str | None = None,
     ) -> None:
         self.region = region or "us-west-2"
         self.db = resource or boto3.resource("dynamodb", region_name=self.region)
         self._async_session = async_session
+        self._endpoint_url = endpoint_url
         self.table = self.db.Table(table_name)
         self.consumed_capacity: float = 0.0
         if key_schema is None:
@@ -120,6 +122,12 @@ class DynamoDb:
         """Return the configured aioboto3 session, or a default one if none was provided."""
         return _get_aioboto3_session(self._async_session)
 
+    def _async_resource_kwargs(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {"region_name": self.region}
+        if self._endpoint_url:
+            kwargs["endpoint_url"] = self._endpoint_url
+        return kwargs
+
     @asynccontextmanager
     async def _async_resource(self):
         """Yield a DynamoDB async resource, reusing the shared one when available."""
@@ -127,12 +135,12 @@ class DynamoDb:
             yield self._shared_resource
         else:
             session = self._get_aioboto3_session()
-            async with session.resource("dynamodb", region_name=self.region) as resource:
+            async with session.resource("dynamodb", **self._async_resource_kwargs()) as resource:
                 yield resource
 
     async def __aenter__(self) -> DynamoDb:
         session = self._get_aioboto3_session()
-        self._resource_cm = session.resource("dynamodb", region_name=self.region)
+        self._resource_cm = session.resource("dynamodb", **self._async_resource_kwargs())
         self._shared_resource = await self._resource_cm.__aenter__()
         return self
 
