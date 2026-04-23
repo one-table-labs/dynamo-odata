@@ -91,7 +91,9 @@ class DynamoDb:
         HMAC-SHA256 signed, producing ``<b64payload>.<b64sig>``.  Without a
         secret the cursor is plain base64 (backward-compatible default).
         """
-        payload = base64.b64encode(json.dumps(last_evaluated_key).encode()).decode()
+        payload = base64.b64encode(
+            json.dumps(last_evaluated_key, default=lambda o: int(o) if isinstance(o, Decimal) else str(o)).encode()
+        ).decode()
         if self._cursor_secret is None:
             return payload
         sig = hmac.new(self._cursor_secret, payload.encode(), hashlib.sha256).digest()
