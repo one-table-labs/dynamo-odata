@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-04-30
+
+### Fixed
+
+- `__all__` in `__init__.py` now sorted (fixes `RUF022` ruff rule).
+- CI test matrix installs `[fastapi,async]` extras so `test_fastapi_service.py` is collected on all Python versions.
+
+### Added
+
+- `docs/hipaa.md` — HIPAA-eligible deployment guide covering tenant isolation, immutable audit records, KMS encryption, cursor signing, `FilterPolicy`, and BAA guidance.
+- README `## HIPAA-eligible deployments` section with summary table and config snippet.
+
+---
+
 ## [0.7.0] - 2026-04-30
 
 ### Added
