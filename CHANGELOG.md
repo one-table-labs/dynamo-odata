@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-04-30
+
+### Added
+
+- **`$expand` support** — `ExpandConfig` frozen dataclass declares a FK relationship;
+  `expand_items_async` resolves all aliases concurrently via `batch_get_async` (no N+1 queries).
+- **Dotted `$select` trimming** — `apply_dotted_select` trims expanded objects to only the
+  requested sub-fields (e.g. `$select=owner.name,owner.email`). A `None` expanded field is
+  left as `None`; no exception is raised.
+- **`parse_expand`** — validates a comma-separated `$expand` string against a caller-supplied
+  allow-list; raises `ValueError` naming the bad alias and the allowed list.
+- **FastAPI integration** (`dynamo-odata[fastapi]`):
+  - `ODataQueryParams` — `Depends`-compatible class that binds `$filter`, `$select`, `$expand`,
+    `$top`, and `$skipToken` query params.
+  - `ODataService` — one-liner `query_items(db, pk, params)` that wires filter, select, expand,
+    pagination, and dotted-select trimming in a single call.
+- **`examples/fastapi_expand.py`** — complete runnable FastAPI app with Swagger UI at
+  `/docs`, demonstrating `ODataService` wired to a route with `$expand`.
+- **`docs/expand-flow.md`** — Mermaid sequence diagram showing one `$expand` request
+  end-to-end (base Query → concurrent BatchGetItem calls → join → dotted-select trim → response).
+
+### Known Limitation
+
+Expanded lookups are active-items only. `DynamoDb._normalize_sks` unconditionally prepends the
+active prefix (`1#`) to every sort key. FK values that point to soft-deleted items silently
+resolve to `None`.
+
+---
+
 ## [0.6.3] - 2026-04-23
 
 ### Added

@@ -5,6 +5,8 @@ DynamoDB-focused OData toolkit: build filters, projections, and query DynamoDB t
 **Features:**
 - OData `$filter` expressions → boto3 `ConditionBase` (no string eval, fully type-safe)
 - OData `$select` → `ProjectionExpression` with reserved keyword handling
+- OData `$expand` → batch FK resolution with dotted `$select` support
+- FastAPI integration: `ODataQueryParams` + `ODataService` wires all OData params in one call
 - DynamoDB CRUD operations with sync and async (`aioboto3`) parity
 - Single-table design helpers (`1#`/`0#` active prefix, soft/hard delete, restore)
 - Atomic multi-item writes via `transact_write`
@@ -18,6 +20,47 @@ DynamoDB-focused OData toolkit: build filters, projections, and query DynamoDB t
 
 ---
 
+## Why dynamo-odata?
+
+### Unreadable filter expressions
+
+```python
+# boto3 raw
+Attr('status').eq('active') & Attr('age').gt(18)
+
+# dynamo-odata — pass the OData string straight from the query param
+filter="status eq 'active' and age gt 18"
+```
+
+### FK resolution N+1 boilerplate
+
+```python
+# boto3 raw — ~50 lines: collect, deduplicate, chunk into 100-key batches,
+# retry UnprocessedKeys, join results back onto base items
+
+# dynamo-odata — one call, concurrent batches, automatic retry
+await expand_items_async(items, {"owner": owner_cfg}, db)
+```
+
+### FastAPI query-param wiring
+
+```python
+# boto3 raw — ~30 lines of Query() params + manual threading to DynamoDB
+
+# dynamo-odata
+@app.get("/items")
+async def list_items(params: ODataQueryParams = Depends(ODataQueryParams)):
+    return await item_service.query_items(db, pk, params)
+```
+
+| Task | Raw boto3 | dynamo-odata |
+| --- | --- | --- |
+| OData filter from query string | ~15 lines (parse, validate, build `ConditionBase`) | `filter="status eq 'active'"` |
+| Resolve FKs for 25 items | ~50 lines (collect, deduplicate, chunk, retry, join) | `expand_items_async(items, specs, db)` |
+| Wire filter/select/expand/pagination in FastAPI | ~30 lines of `Query` params + manual threading | `Depends(ODataQueryParams)` + `query_items` |
+
+---
+
 ## Installation
 
 ```bash
@@ -26,6 +69,9 @@ pip install dynamo-odata
 
 # With async support (aioboto3)
 pip install dynamo-odata[async]
+
+# With FastAPI integration (ODataQueryParams, ODataService)
+pip install dynamo-odata[fastapi]
 
 # Development
 pip install dynamo-odata[dev]
@@ -236,6 +282,98 @@ condition = build_filter("status eq 'active' and age gt 18")
 projection_expr, attr_names = build_projection(["id", "name", "status"])
 # Returns: ("#id,#name,#status", {"#id": "id", "#name": "name", "#status": "status"})
 ```
+
+---
+
+## $expand
+
+Resolve foreign-key fields to full objects using a single `BatchGetItem` call per alias —
+no N+1 queries, automatic deduplication, concurrent fetches.
+
+```python
+from dynamo_odata import DynamoDb
+from dynamo_odata.expand import ExpandConfig, expand_items_async, apply_dotted_select
+
+db = DynamoDb(table_name="main-table", region="us-west-2")
+
+# Declare the FK relationship once
+owner_cfg = ExpandConfig(
+    local_key="owner_user_id",   # FK field on each base item
+    target_pk="USER#tenant1",    # DynamoDB PK for the target entity
+    remote_key="user_id",        # Field on expanded item that matches the FK
+    target_sk_prefix="USER#",    # Prepended to FK value to form the SK body
+    fields=("name", "email"),    # Optional: limit returned fields (None = all)
+)
+
+# Fetch base items
+items, _ = await db.get_all_async(pk="ITEM#tenant1", select="id,status,owner_user_id")
+
+# Resolve FKs — concurrent BatchGetItem per alias, auto-retry on UnprocessedKeys
+items = await expand_items_async(items, {"owner": owner_cfg}, db)
+# items[0] == {"id": "...", "status": "active", "owner_user_id": "alice",
+#               "owner": {"user_id": "alice", "name": "Alice", "email": "alice@ex.com"}}
+
+# Trim expanded objects to only the requested dotted sub-fields
+items = apply_dotted_select(items, "id,status,owner.name,owner.email")
+# items[0]["owner"] == {"name": "Alice", "email": "alice@ex.com"}
+```
+
+**Known limitation:** Expanded lookups are active-items only. `DynamoDb._normalize_sks`
+prepends the active prefix (`1#`) to every sort key, so FK values pointing to soft-deleted
+items silently resolve to `None`.
+
+---
+
+## FastAPI integration
+
+`pip install dynamo-odata[fastapi]`
+
+`ODataQueryParams` binds all five OData query params as a `Depends` argument.
+`ODataService.query_items` wires filter, select, expand, and pagination in one call.
+
+```python
+from fastapi import Depends, FastAPI
+from dynamo_odata import DynamoDb
+from dynamo_odata.expand import ExpandConfig
+from dynamo_odata.fastapi import ODataQueryParams, ODataService
+
+app = FastAPI()
+db = DynamoDb(table_name="main-table", region="us-west-2")
+
+item_service = ODataService(
+    expand_config={
+        "owner": ExpandConfig(
+            local_key="owner_user_id",
+            target_pk="USER#tenant1",
+            remote_key="user_id",
+            target_sk_prefix="USER#",
+        ),
+    }
+)
+
+@app.get("/items")
+async def list_items(params: ODataQueryParams = Depends(ODataQueryParams)):
+    return await item_service.query_items(db, "ITEM#tenant1", params)
+```
+
+Supported query params on any route wired this way:
+
+| Param | Example | Effect |
+| --- | --- | --- |
+| `$filter` | `status eq 'active'` | OData filter expression |
+| `$select` | `id,name,owner.email` | Field projection; dotted paths trim expanded objects |
+| `$expand` | `owner` | Resolve FK alias(es) via BatchGetItem |
+| `$top` | `25` | Page size (default 25) |
+| `$skipToken` | _(opaque cursor)_ | Pagination token from `@odata.nextLink` |
+
+Dotted `$select` fields (e.g. `owner.email`) automatically add the implied expand — no
+explicit `$expand=owner` needed.
+
+See `examples/fastapi_expand.py` for a complete runnable app with Swagger UI.
+
+**$expand flow:**
+
+![expand flow](https://raw.githubusercontent.com/one-table-labs/dynamo-odata/main/docs/expand-flow.svg)
 
 ---
 
@@ -538,12 +676,16 @@ except InvalidQueryException as e:
 ## Repository layout
 
 - `plan/` — implementation plans and roadmap
+- `docs/` — diagrams and supplementary docs
+- `examples/` — runnable example apps
 - `src/dynamo_odata/` — library source code
   - `db.py` — DynamoDb client class
   - `dynamo_filter.py` — OData filter building
   - `projection.py` — projection expression building
+  - `expand.py` — `$expand` FK resolution (`ExpandConfig`, `expand_items_async`, `apply_dotted_select`, `parse_expand`)
+  - `fastapi/` — FastAPI integration (`ODataQueryParams`, `ODataService`)
   - `odata_query/` — vendored OData parser and AST
-- `tests/` — automated test suite (133 passing tests)
+- `tests/` — automated test suite
 
 ## Development
 
@@ -565,14 +707,13 @@ pytest tests/test_filter.py -v
 
 ### Project Status
 
-| Phase | Status | Next |
-|-------|--------|------|
-| Core library | ✅ Complete | Phase 4: Upstream contribution |
-| Parser (lark) | ✅ Complete | — |
-| Async support | ✅ Complete | — |
-| Test coverage | ✅ 133 tests | — |
-| **FastAPI layer** | 📅 v1.1 | ODataService, ODataRouter |
-| **PyPI publish** | 📅 Soon | Need upstream contribution first |
+| Phase | Status | Version |
+|-------|--------|---------|
+| Core library | ✅ Complete | 0.1.0 |
+| Parser (lark) | ✅ Complete | 0.1.0 |
+| Async support | ✅ Complete | 0.5.0 |
+| `$expand` + FastAPI layer | ✅ Complete | 0.7.0 |
+| **PyPI publish** | 📅 Pending | — |
 
 ---
 
@@ -588,14 +729,8 @@ This package includes a vendored and modified version of the OData AST, visitor,
 
 ## What's Next?
 
-Planned for upcoming releases:
-
-- **v1.1**: FastAPI integration layer (ODataService, ODataRouter, Pydantic models)
-- **v1.2**: `$expand` support with dotted `$select` (N+1 optimization)
 - Contribute DynamoDB visitor back to upstream `odata-query` project
-- Integration with `consumer_sdk` package
-
-See `plan/DYNAMO_ODATA_STANDALONE_PLAN.md` for detailed implementation roadmap.
+- PyPI publish (`pip install dynamo-odata`) — see Phase 3 of the expand plan
 
 ---
 

@@ -108,7 +108,12 @@ src/dynamo_odata/
 ├── __init__.py           # Public API exports
 ├── db.py                 # DynamoDb client class
 ├── dynamo_filter.py      # Filter building
+├── expand.py             # $expand FK resolution (ExpandConfig, expand_items_async)
 ├── projection.py         # Projection expression building
+├── fastapi/              # FastAPI integration (ODataQueryParams, ODataService)
+│   ├── __init__.py
+│   ├── params.py
+│   └── service.py
 └── odata_query/          # Vendored OData parser
     ├── ast.py            # AST node definitions
     ├── grammar.py        # Lark-based parser
@@ -116,6 +121,22 @@ src/dynamo_odata/
     └── dynamo/           # DynamoDB-specific visitor
         └── base.py       # AstToDynamoConditionVisitor
 ```
+
+### Diagrams
+
+`docs/expand-flow.md` contains a Mermaid sequence diagram showing the `$expand` request
+pipeline. When the diagram source changes, regenerate the SVG artifact:
+
+```bash
+# Install the Mermaid CLI (Node.js tool — not in pyproject.toml)
+npm install -g @mermaid-js/mermaid-cli
+
+# Regenerate the SVG
+mmdc -i docs/expand-flow.md -o docs/expand-flow.svg
+```
+
+Commit both `docs/expand-flow.md` (source) and `docs/expand-flow.svg` (rendered artifact)
+so PyPI and external sites can display the image.
 
 ### Testing Requirements
 

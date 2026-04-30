@@ -2,6 +2,7 @@
 
 from .db import DynamoDb
 from .dynamo_filter import AstToDynamoConditionVisitor, build_filter, validate_filter
+from .expand import ExpandConfig, apply_dotted_select, expand_items_async, parse_expand
 from .guardrails import (
     FilterPolicy,
     FilterPolicyViolationError,
@@ -26,6 +27,10 @@ from .schema import DEFAULT_KEY_SCHEMA, UPPERCASE_KEY_SCHEMA, KeySchema
 
 __all__ = [
     "DEFAULT_ALLOWED_COMPARATORS",
+    "ExpandConfig",
+    "apply_dotted_select",
+    "expand_items_async",
+    "parse_expand",
     "DEFAULT_ALLOWED_FUNCTIONS",
     "DEFAULT_FORBIDDEN_RESPONSE_FIELDS",
     "DEFAULT_KEY_SCHEMA",
