@@ -12,6 +12,7 @@ DynamoDB-focused OData toolkit: build filters, projections, and query DynamoDB t
 - Atomic multi-item writes via `transact_write`
 - GSI queries with OData filter support
 - Pydantic-friendly: call `model.model_dump(exclude_none=True)` before writes — see [Pydantic integration](#pydantic-integration)
+- HIPAA-eligible patterns: `PartitionKeyGuard`, `FilterPolicy`, signed cursors, immutable audit records
 - 197 tests, lark-based parser, Python 3.10+
 
 **What this is:** A focused DynamoDB library. Not an ORM, not a general SQL tool, not a full OData server.
@@ -714,6 +715,42 @@ pytest tests/test_filter.py -v
 | Async support | ✅ Complete | 0.5.0 |
 | `$expand` + FastAPI layer | ✅ Complete | 0.7.0 |
 | **PyPI publish** | 📅 Pending | — |
+
+---
+
+## HIPAA-eligible deployments
+
+`dynamo-odata` supports HIPAA-eligible architectures when the following patterns are
+followed. See [`docs/hipaa.md`](docs/hipaa.md) for the full compliance guide.
+
+**Key requirements:**
+
+| Requirement | Mechanism |
+| --- | --- |
+| Tenant isolation | `PartitionKeyGuard` + `TENANT#<id>` PK on every query |
+| Immutable audit records | `create_item_async` only on `AUDIT#` items — no TTL, no delete, no update |
+| Encryption at rest | KMS CMK on the DynamoDB table (infra config — outside this library) |
+| No PHI in logs | Do not log `items`, filter strings, or pagination cursors |
+| Signed cursors | Pass `cursor_secret` (from AWS Secrets Manager) to the constructor |
+| API filter restriction | `FilterPolicy` on all user-facing `$filter` endpoints |
+
+```python
+from dynamo_odata import DynamoDb, FilterPolicy, PartitionKeyGuard
+
+db = DynamoDb(
+    table_name="main-table",
+    cursor_secret=os.environ["CURSOR_SIGNING_SECRET"],
+    partition_key_guard=PartitionKeyGuard(("TENANT#",)),
+    filter_policy=FilterPolicy(
+        allowed_fields=frozenset({"status", "created_at", "file_type"}),
+        allowed_comparators=frozenset({"eq", "ne", "gt", "ge", "lt", "le"}),
+        max_predicates=4,
+    ),
+)
+```
+
+`dynamo-odata` is a client library and does not require a separate BAA. Ensure you have
+a signed BAA with AWS (available via AWS Artifact) before storing PHI in DynamoDB.
 
 ---
 
