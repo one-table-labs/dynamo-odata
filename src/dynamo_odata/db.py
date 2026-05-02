@@ -118,6 +118,20 @@ class DynamoDb:
             return json.loads(base64.b64decode(payload.encode()).decode())
         return json.loads(base64.b64decode(cursor.encode()).decode())
 
+    def encode_offset_cursor(self, offset: int) -> str:
+        """Return an opaque cursor representing a Python-side pagination offset."""
+        return self._encode_cursor({"__type": "offset", "offset": offset})
+
+    @staticmethod
+    def is_offset_cursor(cursor_payload: dict) -> bool:
+        """Return True if the decoded cursor payload is an offset cursor."""
+        return cursor_payload.get("__type") == "offset"
+
+    @staticmethod
+    def decode_offset_cursor(cursor_payload: dict) -> int:
+        """Extract the integer offset from a decoded offset-cursor payload."""
+        return int(cursor_payload["offset"])
+
     def _get_aioboto3_session(self) -> Any:
         """Return the configured aioboto3 session, or a default one if none was provided."""
         return _get_aioboto3_session(self._async_session)

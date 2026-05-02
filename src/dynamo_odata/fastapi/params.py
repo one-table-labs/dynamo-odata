@@ -16,9 +16,17 @@ class ODataQueryParams:
         expand: str | None = Query(None, alias="$expand"),
         top: int | None = Query(None, alias="$top"),
         skip_token: str | None = Query(None, alias="$skipToken"),
+        sort: str | None = Query(None, alias="sort"),
+        order: str = Query("desc", alias="order"),
+        limit: int = Query(25, alias="limit"),
+        cursor: str | None = Query(None, alias="cursor"),
     ) -> None:
         self.filter = filter
         self.select = select
         self.expand = expand
         self.top = top
         self.skip_token = skip_token
+        self.sort = sort
+        self.order = order
+        self.limit = limit
+        self.cursor = cursor

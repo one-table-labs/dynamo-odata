@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-05-02
+
+### Added
+
+- **Offset cursor helpers** — `DynamoDb.encode_offset_cursor(offset)`, `is_offset_cursor(payload)`,
+  and `decode_offset_cursor(payload)` enable opaque pagination over Python-sorted result sets.
+  Offset cursors share the same transport and HMAC signing as LSI (`LastEvaluatedKey`) cursors.
+- **`sort_items` utility** — standalone, DynamoDB-free helper that sorts a list of item dicts by
+  a single field with case-insensitive string comparison and missing-field-last semantics.
+  Exported from `dynamo_odata` directly.
+- **Extended `ODataQueryParams`** — four new parameters: `sort` (field name), `order`
+  (`"asc"`/`"desc"`, default `"desc"`), `limit` (int, default 25), and `cursor` (opaque string).
+  All existing OData params (`$filter`, `$select`, `$expand`, `$top`, `$skipToken`) are unchanged.
+- **`ODataService.list_async`** — high-level method that routes to the correct DynamoDB execution
+  strategy based on the requested sort field and a caller-supplied `sort_field_map`:
+  - **LSI path** — field in map → `get_all_async` with `lsi` and `scan_index_forward`.
+  - **Python-sort path** — field not in map → fetch-all, `sort_items`, offset-cursor pagination.
+  - **Unsorted path** — no sort → standard `get_all_async` with limit/cursor.
+  Returns `{"items": [...], "next_cursor": str | None}` on all paths. `$expand` pipeline runs
+  on the page slice (not the full fetched set) on the Python-sort path.
+
+---
+
 ## [0.7.1] - 2026-04-30
 
 ### Fixed

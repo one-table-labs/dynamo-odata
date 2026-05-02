@@ -24,6 +24,7 @@ from .profiles import (
 )
 from .projection import build_projection
 from .schema import DEFAULT_KEY_SCHEMA, UPPERCASE_KEY_SCHEMA, KeySchema
+from .utils import sort_items
 
 __all__ = [
     "AstToDynamoConditionVisitor",
@@ -53,4 +54,5 @@ __all__ = [
     "validate_filter",
     "validate_page_size",
     "validate_regulated_query",
+    "sort_items",
 ]
