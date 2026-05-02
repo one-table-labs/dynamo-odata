@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from .db import DynamoDb
@@ -41,11 +41,14 @@ async def expand_items_async(
         if not fk_values:
             return alias, {}
         sks = [f"{cfg.target_sk_prefix}{fk}" for fk in fk_values]
-        results = await db.batch_get_async(
-            cfg.target_pk,
-            sks,
-            fields=list(cfg.fields) if cfg.fields is not None else None,
-            item_only=True,
+        results = cast(
+            list[dict[str, Any]],
+            await db.batch_get_async(
+                cfg.target_pk,
+                sks,
+                fields=list(cfg.fields) if cfg.fields is not None else None,
+                item_only=True,
+            ),
         )
         lookup: dict[str, Any] = {r[cfg.remote_key]: r for r in results if cfg.remote_key in r}
         return alias, lookup
