@@ -9,7 +9,6 @@ from dynamo_odata import DynamoDb
 from dynamo_odata.expand import ExpandConfig
 from dynamo_odata.fastapi import ODataQueryParams, ODataService
 
-
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
 

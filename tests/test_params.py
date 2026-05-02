@@ -5,15 +5,15 @@ from dynamo_odata.fastapi import ODataQueryParams
 
 def _make_params(**kwargs) -> ODataQueryParams:
     p = object.__new__(ODataQueryParams)
-    p.filter = kwargs.get("filter", None)
-    p.select = kwargs.get("select", None)
-    p.expand = kwargs.get("expand", None)
-    p.top = kwargs.get("top", None)
-    p.skip_token = kwargs.get("skip_token", None)
-    p.sort = kwargs.get("sort", None)
+    p.filter = kwargs.get("filter")
+    p.select = kwargs.get("select")
+    p.expand = kwargs.get("expand")
+    p.top = kwargs.get("top")
+    p.skip_token = kwargs.get("skip_token")
+    p.sort = kwargs.get("sort")
     p.order = kwargs.get("order", "desc")
     p.limit = kwargs.get("limit", 25)
-    p.cursor = kwargs.get("cursor", None)
+    p.cursor = kwargs.get("cursor")
     return p
 
 
