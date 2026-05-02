@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dynamo-odata"
-version = "0.7.1"
+version = "0.8.0"
 description = "OData filter and projection helpers for AWS DynamoDB"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -82,6 +82,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "src/dynamo_odata/odata_query/lark_parser.py" = ["E501"]  # unsplittable regex literals in grammar
 "tests/test_cursor_signing.py" = ["S106"]  # hardcoded secrets are test fixtures, not credentials
+"tests/test_offset_cursor.py" = ["S106"]   # hardcoded secrets are test fixtures, not credentials
+"tests/test_params.py" = ["S105", "S106"]  # skip_token test values are not passwords
+"tests/test_list_async.py" = ["S106"]      # hardcoded skip_token values are test fixtures
 "examples/*.py" = ["T201"]  # print is the intended output mechanism for runnable examples
 
 [tool.ruff.lint.isort]

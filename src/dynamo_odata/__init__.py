@@ -24,14 +24,16 @@ from .profiles import (
 )
 from .projection import build_projection
 from .schema import DEFAULT_KEY_SCHEMA, UPPERCASE_KEY_SCHEMA, KeySchema
+from .utils import sort_items
 
 __all__ = [
-    "AstToDynamoConditionVisitor",
-    "AuditHook",
     "DEFAULT_ALLOWED_COMPARATORS",
     "DEFAULT_ALLOWED_FUNCTIONS",
     "DEFAULT_FORBIDDEN_RESPONSE_FIELDS",
     "DEFAULT_KEY_SCHEMA",
+    "UPPERCASE_KEY_SCHEMA",
+    "AstToDynamoConditionVisitor",
+    "AuditHook",
     "DynamoDb",
     "ExpandConfig",
     "FilterPolicy",
@@ -41,7 +43,6 @@ __all__ = [
     "PartitionKeyGuard",
     "PartitionKeyValidationError",
     "RegulatedProfile",
-    "UPPERCASE_KEY_SCHEMA",
     "apply_dotted_select",
     "apply_response_allowlist",
     "apply_response_field_policy",
@@ -50,6 +51,7 @@ __all__ = [
     "build_regulated_profile",
     "expand_items_async",
     "parse_expand",
+    "sort_items",
     "validate_filter",
     "validate_page_size",
     "validate_regulated_query",

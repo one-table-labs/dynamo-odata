@@ -378,6 +378,68 @@ See `examples/fastapi_expand.py` for a complete runnable app with Swagger UI.
 
 ---
 
+### `list_async` — sort fallback and REST-style params
+
+`ODataService.list_async` is a higher-level alternative to `query_items` that accepts
+both OData and REST-convention params and automatically routes to the right DynamoDB
+execution strategy:
+
+| Scenario | Strategy |
+| --- | --- |
+| `sort` field is in `sort_field_map` | LSI query (`get_all_async` with `lsi=` + `scan_index_forward`) |
+| `sort` field is **not** in `sort_field_map` | Fetch all → `sort_items` in Python → offset-cursor pagination |
+| No `sort` | Standard `get_all_async` with `limit`/`cursor` |
+
+```python
+from dynamo_odata.fastapi import ODataQueryParams, ODataService
+
+svc = ODataService(expand_config={"owner": ExpandConfig(...)})
+
+@app.get("/files")
+async def list_files(params: ODataQueryParams = Depends()):
+    return await svc.list_async(
+        db=db,
+        pk=f"TENANT#{tenant_id}",
+        params=params,
+        sort_field_map={
+            "name":       ("lsi-s3-index", "lsis3"),
+            "created_at": ("lsi-s1-index", "lsis1"),
+            # fields NOT listed here are sorted in Python
+        },
+    )
+```
+
+All nine query params are available on every route:
+
+| Param | Convention | Default | Effect |
+| --- | --- | --- | --- |
+| `$filter` | OData | — | Filter expression |
+| `$select` | OData | — | Field projection |
+| `$expand` | OData | — | FK expansion |
+| `$top` | OData | — | Page size (takes precedence over `limit`) |
+| `$skipToken` | OData | — | Cursor (takes precedence over `cursor`) |
+| `sort` | REST | — | Sort field name |
+| `order` | REST | `"desc"` | `"asc"` or `"desc"` |
+| `limit` | REST | `25` | Page size |
+| `cursor` | REST | — | Opaque pagination cursor |
+
+Return shape is always `{"items": [...], "next_cursor": str | None}`.
+
+See `examples/fastapi_list.py` for a complete runnable app.
+
+#### `sort_items`
+
+A standalone utility for case-insensitive, missing-field-last in-memory sorting:
+
+```python
+from dynamo_odata import sort_items
+
+sorted_items = sort_items(items, field="name", direction="asc")
+# items missing "name" sort last regardless of direction
+```
+
+---
+
 ## Filter Expressions (OData)
 
 ### Supported Operators
