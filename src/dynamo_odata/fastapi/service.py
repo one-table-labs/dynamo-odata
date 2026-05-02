@@ -119,11 +119,7 @@ class ODataService:
             )
             all_items = sort_items(all_items, params.sort, params.order)
             page = all_items[offset : offset + effective_limit]
-            next_cursor = (
-                db.encode_offset_cursor(offset + len(page))
-                if len(page) == effective_limit
-                else None
-            )
+            next_cursor = db.encode_offset_cursor(offset + len(page)) if len(page) == effective_limit else None
             if expand_specs:
                 page = await expand_items_async(page, expand_specs, db)
             page = apply_dotted_select(page, params.select)

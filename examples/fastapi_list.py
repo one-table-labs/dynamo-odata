@@ -64,7 +64,7 @@ EXPAND_CONFIG: dict[str, ExpandConfig] = {
 # Maps a sort field name to (lsi_index_name, lsi_sort_attribute).
 # Fields NOT in this map are sorted in Python (fetch-all + sort_items).
 SORT_FIELD_MAP = {
-    "name":       ("lsi-s3-index", "lsis3"),
+    "name": ("lsi-s3-index", "lsis3"),
     "created_at": ("lsi-s1-index", "lsis1"),
 }
 

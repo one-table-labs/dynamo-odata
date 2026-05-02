@@ -150,7 +150,8 @@ class TestListAsyncPythonSortPath:
         # Second page using returned cursor
         result2 = asyncio.run(
             svc.list_async(
-                real_db, "PK#t1",
+                real_db,
+                "PK#t1",
                 _params(sort="n", order="asc", limit=4, cursor=result1["next_cursor"]),
                 SORT_MAP,
             )
@@ -158,18 +159,14 @@ class TestListAsyncPythonSortPath:
         assert [r["n"] for r in result2["items"]] == [4, 5, 6, 7]
 
     def test_python_sort_expand_runs_on_page_not_full_set(self):
-        owner_cfg = ExpandConfig(
-            local_key="owner_id", target_pk="USER#t1", remote_key="uid", target_sk_prefix="USER#"
-        )
+        owner_cfg = ExpandConfig(local_key="owner_id", target_pk="USER#t1", remote_key="uid", target_sk_prefix="USER#")
         # "score" is NOT in SORT_MAP → triggers Python-sort path
         all_items = [{"score": i, "owner_id": f"u{i}"} for i in range(10)]
         db = _mock_db(items=all_items)
         db.batch_get_async = AsyncMock(return_value=[{"uid": "u0", "email": "a@b.com"}])
 
         svc = ODataService(expand_config={"owner": owner_cfg})
-        asyncio.run(
-            svc.list_async(db, "PK#t1", _params(sort="score", order="asc", limit=3, expand="owner"), SORT_MAP)
-        )
+        asyncio.run(svc.list_async(db, "PK#t1", _params(sort="score", order="asc", limit=3, expand="owner"), SORT_MAP))
         # batch_get_async should be called with at most limit items (3), not all 10
         call_args = db.batch_get_async.call_args
         requested_keys = call_args[1].get("keys") or call_args[0][1] if call_args[0] else []

@@ -163,10 +163,7 @@ class TestExpandItemsAsync:
         assert call_pks == {"USER#t1"}
 
     def test_max_aliases_guardrail(self):
-        specs = {
-            f"alias{i}": ExpandConfig(local_key=f"fk{i}", target_pk="PK", remote_key="id")
-            for i in range(4)
-        }
+        specs = {f"alias{i}": ExpandConfig(local_key=f"fk{i}", target_pk="PK", remote_key="id") for i in range(4)}
         items = [{"id": "1"}]
         db = MagicMock()
 

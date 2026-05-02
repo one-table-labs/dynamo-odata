@@ -32,13 +32,9 @@ async def expand_items_async(
         return items
 
     if len(expand_specs) > _MAX_ALIASES:
-        raise ValueError(
-            f"Too many $expand aliases ({len(expand_specs)}); maximum is {_MAX_ALIASES}."
-        )
+        raise ValueError(f"Too many $expand aliases ({len(expand_specs)}); maximum is {_MAX_ALIASES}.")
     if len(items) > _MAX_BASE_ITEMS:
-        raise ValueError(
-            f"Too many base items ({len(items)}) when $expand is active; maximum is {_MAX_BASE_ITEMS}."
-        )
+        raise ValueError(f"Too many base items ({len(items)}) when $expand is active; maximum is {_MAX_BASE_ITEMS}.")
 
     async def _fetch_alias(alias: str, cfg: ExpandConfig) -> tuple[str, dict[str, Any]]:
         fk_values = list({item[cfg.local_key] for item in items if item.get(cfg.local_key) is not None})
