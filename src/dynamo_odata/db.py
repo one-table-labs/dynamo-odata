@@ -5,20 +5,51 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import time
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, TypeVar
 
 import boto3
 from boto3.dynamodb.conditions import Attr, ConditionBase, Key
+from botocore.exceptions import ConnectionError as BotoConnectionError
+from botocore.exceptions import HTTPClientError
 
 from .dynamo_filter import build_filter
 from .guardrails import FilterPolicy, PartitionKeyGuard
 from .projection import build_projection
 from .schema import KeySchema
+
+logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+
+
+def _is_stale_connection_error(exc: BaseException) -> bool:
+    """True if ``exc`` indicates the (shared) async resource's connection/session
+    is dead — i.e. the request never reached DynamoDB and is safe to retry once
+    on a fresh resource.
+
+    Covers botocore transport errors — ``ConnectionError`` (and its
+    ``EndpointConnectionError`` …) plus ``HTTPClientError`` (and its
+    ``ConnectionClosedError`` / ``ReadTimeoutError`` …) — aiohttp client errors,
+    and the ``RuntimeError("... is closed")`` / ``"Event loop is closed"`` family
+    raised by aiobotocore/aiohttp when a long-lived client has been torn down.
+    """
+    if isinstance(exc, (BotoConnectionError, HTTPClientError)):
+        return True
+    try:  # aiohttp is a transitive dep via aioboto3; import lazily.
+        import aiohttp
+
+        if isinstance(exc, aiohttp.ClientError):
+            return True
+    except ImportError:  # pragma: no cover - aiohttp always present with aioboto3
+        pass
+    return isinstance(exc, RuntimeError) and "closed" in str(exc).lower()
 
 
 def _get_aioboto3_session(async_session: Any = None) -> Any:
@@ -151,6 +182,37 @@ class DynamoDb:
             session = self._get_aioboto3_session()
             async with session.resource("dynamodb", **self._async_resource_kwargs()) as resource:
                 yield resource
+
+    async def _run_async(self, op: Callable[[Any], Awaitable[_T]]) -> _T:
+        """Run ``op(resource)`` against a DynamoDB async resource, self-healing a
+        stale shared resource.
+
+        When a long-lived shared resource is in use (set via ``__aenter__`` or
+        injected by the host app) its session/connection can go stale in a
+        long-running process; the call then fails client-side before reaching
+        DynamoDB. On such a connection error we discard the stale shared resource
+        and retry the operation once on a freshly-created per-call resource.
+
+        Operations that already use a fresh per-call resource, and non-connection
+        errors (e.g. ``ClientError``), are never retried — they propagate.
+        """
+        try:
+            async with self._async_resource() as resource:
+                return await op(resource)
+        except Exception as exc:
+            if self._shared_resource is None or not _is_stale_connection_error(exc):
+                raise
+            logger.warning(
+                "dynamo-odata: shared async DynamoDB resource appears stale (%s); "
+                "discarding it and retrying once on a fresh resource",
+                type(exc).__name__,
+            )
+            # Stop using the dead shared resource on this instance.
+            self._shared_resource = None
+            self._resource_cm = None
+            session = self._get_aioboto3_session()
+            async with session.resource("dynamodb", **self._async_resource_kwargs()) as resource:
+                return await op(resource)
 
     async def __aenter__(self) -> DynamoDb:
         session = self._get_aioboto3_session()
@@ -894,9 +956,12 @@ class DynamoDb:
             "ReturnValues": "ALL_NEW",
             "ReturnConsumedCapacity": "TOTAL",
         }
-        async with self._async_resource() as resource:
+
+        async def _op(resource: Any) -> dict[str, Any]:
             table = await resource.Table(self.table.name)
-            response = await table.update_item(**params)
+            return await table.update_item(**params)
+
+        response = await self._run_async(_op)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
         return response.get("Attributes", {})
 
