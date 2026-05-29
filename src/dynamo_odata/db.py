@@ -662,25 +662,28 @@ class DynamoDb:
             params["ExclusiveStartKey"] = start_key
 
         async def _op(resource: Any) -> tuple[list[dict[str, Any]], str | None]:
+            # Local copy so a self-heal retry (which re-runs _op) starts from the
+            # original params, not a mutated mid-pagination state.
+            query_params = dict(params)
             table = await resource.Table(self.table.name)
             items: list[dict[str, Any]] = []
 
             if fetch_all:
-                params["Limit"] = 500
+                query_params["Limit"] = 500
                 last_key: Any = True
                 while last_key is not None:
-                    result = await table.query(**params)
+                    result = await table.query(**query_params)
                     self.add_consumed_capacity(result.get("ConsumedCapacity"))
                     items.extend(result.get("Items", []))
                     last_key = result.get("LastEvaluatedKey")
                     if last_key:
-                        params["ExclusiveStartKey"] = last_key
+                        query_params["ExclusiveStartKey"] = last_key
                     else:
-                        params.pop("ExclusiveStartKey", None)
+                        query_params.pop("ExclusiveStartKey", None)
                 return items, None
 
-            params["Limit"] = limit
-            result = await table.query(**params)
+            query_params["Limit"] = limit
+            result = await table.query(**query_params)
             self.add_consumed_capacity(result.get("ConsumedCapacity"))
             items = result.get("Items", [])
             next_cursor: str | None = None

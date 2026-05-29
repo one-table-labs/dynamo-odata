@@ -101,3 +101,33 @@ def test_update_item_async_connection_error_without_shared_resource_propagates()
         mock_session.return_value.resource.return_value = ctx
         with pytest.raises(ConnectionClosedError):
             asyncio.run(db.update_item_async("TENANT#t1#USER", "1#u1", {"name": "x"}))
+
+
+def test_get_all_async_self_heals_on_stale_shared_resource():
+    """A paginating read recovers via a fresh resource with a clean accumulator."""
+    db = _make_db()
+
+    # Stale shared resource: query raises a connection error (request never lands).
+    stale_table = AsyncMock()
+    stale_table.query.side_effect = ConnectionClosedError(endpoint_url="https://dynamodb.us-east-1.amazonaws.com")
+    stale_resource = AsyncMock()
+    stale_resource.Table.return_value = stale_table
+    db._shared_resource = stale_resource
+
+    # Fresh resource returns one full page (no LastEvaluatedKey).
+    fresh_table = AsyncMock()
+    fresh_table.query.return_value = {"Items": [{"SK": "1#a"}, {"SK": "1#b"}]}
+    fresh_resource = AsyncMock()
+    fresh_resource.Table.return_value = fresh_table
+    fresh_ctx = AsyncMock()
+    fresh_ctx.__aenter__.return_value = fresh_resource
+    fresh_ctx.__aexit__.return_value = False
+
+    with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
+        mock_session.return_value.resource.return_value = fresh_ctx
+        items, next_cursor = asyncio.run(db.get_all_async("TENANT#t1#USER", fetch_all=True))
+
+    assert items == [{"SK": "1#a"}, {"SK": "1#b"}]  # no loss, no duplication
+    assert next_cursor is None
+    assert db._shared_resource is None
+    stale_table.query.assert_awaited_once()
