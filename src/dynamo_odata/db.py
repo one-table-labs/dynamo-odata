@@ -520,15 +520,15 @@ class DynamoDb:
                     table_spec["ExpressionAttributeNames"] = expr_attr_names
 
         batch_chunk = 100
-        all_items: list[dict[str, Any]] = []
-        pending_keys = keys
-        retry_delay = 0.0
 
-        async with self._async_resource() as resource:
-            while pending_keys:
-                chunk, pending_keys = (
-                    pending_keys[:batch_chunk],
-                    pending_keys[batch_chunk:],
+        async def _op(resource: Any) -> list[dict[str, Any]]:
+            op_items: list[dict[str, Any]] = []
+            op_pending = list(keys)
+            op_retry_delay = 0.0
+            while op_pending:
+                chunk, op_pending = (
+                    op_pending[:batch_chunk],
+                    op_pending[batch_chunk:],
                 )
                 request_items: dict[str, Any] = {table_name: {**table_spec, "Keys": chunk}}
                 response = await resource.batch_get_item(
@@ -536,16 +536,18 @@ class DynamoDb:
                     ReturnConsumedCapacity="TOTAL",
                 )
                 self.add_consumed_capacity(response.get("ConsumedCapacity"))
-                all_items.extend(response.get("Responses", {}).get(table_name, []))
+                op_items.extend(response.get("Responses", {}).get(table_name, []))
 
                 unprocessed = response.get("UnprocessedKeys", {})
                 if unprocessed and table_name in unprocessed:
-                    retry_delay = min(retry_delay * 2 if retry_delay else 0.05, 1.0)
-                    await asyncio.sleep(retry_delay)
-                    pending_keys = unprocessed[table_name]["Keys"] + pending_keys
+                    op_retry_delay = min(op_retry_delay * 2 if op_retry_delay else 0.05, 1.0)
+                    await asyncio.sleep(op_retry_delay)
+                    op_pending = unprocessed[table_name]["Keys"] + op_pending
                 else:
-                    retry_delay = 0.0
+                    op_retry_delay = 0.0
+            return op_items
 
+        all_items = await self._run_async(_op)
         if item_only:
             return all_items
         return {"Responses": {table_name: all_items}}
@@ -578,9 +580,11 @@ class DynamoDb:
                 if expr_attr_names:
                     params["ExpressionAttributeNames"] = expr_attr_names
 
-        async with self._async_resource() as resource:
+        async def _op(resource: Any) -> dict[str, Any]:
             table = await resource.Table(self.table.name)
-            response = await table.get_item(**params)
+            return await table.get_item(**params)
+
+        response = await self._run_async(_op)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
         item = response.get("Item")
         if item is None:
@@ -657,9 +661,9 @@ class DynamoDb:
         if start_key is not None:
             params["ExclusiveStartKey"] = start_key
 
-        items: list[dict[str, Any]] = []
-        async with self._async_resource() as resource:
+        async def _op(resource: Any) -> tuple[list[dict[str, Any]], str | None]:
             table = await resource.Table(self.table.name)
+            items: list[dict[str, Any]] = []
 
             if fetch_all:
                 params["Limit"] = 500
@@ -683,6 +687,8 @@ class DynamoDb:
             if last_evaluated := result.get("LastEvaluatedKey"):
                 next_cursor = self._encode_cursor(last_evaluated)
             return items, next_cursor
+
+        return await self._run_async(_op)
 
     def put(
         self,
@@ -800,9 +806,11 @@ class DynamoDb:
         if expression_attribute_names:
             params["ExpressionAttributeNames"] = expression_attribute_names
 
-        async with self._async_resource() as resource:
+        async def _op(resource: Any) -> dict[str, Any]:
             table = await resource.Table(self.table.name)
-            response = await table.update_item(**params)
+            return await table.update_item(**params)
+
+        response = await self._run_async(_op)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
         if item_only and "Attributes" in response:
             return response["Attributes"]
@@ -837,9 +845,12 @@ class DynamoDb:
         body = self._convert_to_decimal(dict(item))
         body = self._strip_key_attributes(body)
         full_item = {self.partition_key_name: pk, self.sort_key_name: sk, **body}
-        async with self._async_resource() as resource:
+
+        async def _op(resource: Any) -> None:
             table = await resource.Table(self.table.name)
             await table.put_item(Item=full_item, ReturnConsumedCapacity="TOTAL")
+
+        await self._run_async(_op)
 
     def create_item(self, pk: str, sk: str, item: dict[str, Any]) -> None:
         """
@@ -878,13 +889,16 @@ class DynamoDb:
         body = self._convert_to_decimal(dict(item))
         body = self._strip_key_attributes(body)
         full_item = {self.partition_key_name: pk, self.sort_key_name: sk, **body}
-        async with self._async_resource() as resource:
+
+        async def _op(resource: Any) -> None:
             table = await resource.Table(self.table.name)
             await table.put_item(
                 Item=full_item,
                 ConditionExpression=Attr(self.partition_key_name).not_exists(),
                 ReturnConsumedCapacity="TOTAL",
             )
+
+        await self._run_async(_op)
 
     def update_item(self, pk: str, sk: str, updates: dict[str, Any]) -> dict[str, Any]:
         """
@@ -989,9 +1003,10 @@ class DynamoDb:
     async def _batch_purge_keys_async(self, keys: list[dict[str, str]]) -> None:
         """Async version of _batch_purge_keys."""
         table_name = self.table.name
-        pending = list(keys)
-        retry_delay = 0.0
-        async with self._async_resource() as resource:
+
+        async def _op(resource: Any) -> None:
+            pending = list(keys)
+            retry_delay = 0.0
             while pending:
                 chunk, pending = pending[:25], pending[25:]
                 request_items: dict[str, Any] = {table_name: [{"DeleteRequest": {"Key": k}} for k in chunk]}
@@ -1007,6 +1022,8 @@ class DynamoDb:
                     pending = [req["DeleteRequest"]["Key"] for req in unprocessed] + pending
                 else:
                     retry_delay = 0.0
+
+        await self._run_async(_op)
 
     def delete(
         self,
@@ -1114,13 +1131,15 @@ class DynamoDb:
                     new_record[key] = value
             await self.put_async(pk=pk, sk=new_sk, data=new_record)
 
-        async with self._async_resource() as resource:
+        async def _op(resource: Any) -> dict[str, Any]:
             table = await resource.Table(self.table.name)
-            response = await table.delete_item(
+            return await table.delete_item(
                 Key=self._key_dict(pk, sk),
                 ReturnValues="ALL_OLD",
                 ReturnConsumedCapacity="TOTAL",
             )
+
+        response = await self._run_async(_op)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
         return response
 
@@ -1185,13 +1204,16 @@ class DynamoDb:
             raise ValueError("Either sk or sk_begins_with must be provided")
 
         if is_purge:
-            async with self._async_resource() as resource:
+
+            async def _op(resource: Any) -> dict[str, Any]:
                 table = await resource.Table(self.table.name)
-                response = await table.delete_item(
+                return await table.delete_item(
                     Key=self._key_dict(pk, sk),
                     ReturnValues="ALL_OLD",
                     ReturnConsumedCapacity="TOTAL",
                 )
+
+            response = await self._run_async(_op)
             self.add_consumed_capacity(response.get("ConsumedCapacity"))
             return response
 
@@ -1414,9 +1436,11 @@ class DynamoDb:
         if cursor is not None:
             params["ExclusiveStartKey"] = self._decode_cursor(cursor)
 
-        async with self._async_resource() as resource:
+        async def _op(resource: Any) -> dict[str, Any]:
             table = await resource.Table(self.table.name)
-            response = await table.query(**params)
+            return await table.query(**params)
+
+        response = await self._run_async(_op)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
         items = response.get("Items", [])
 
@@ -1550,9 +1574,11 @@ class DynamoDb:
         if skip_token is not None:
             params["ExclusiveStartKey"] = skip_token
 
-        async with self._async_resource() as resource:
+        async def _op(resource: Any) -> dict[str, Any]:
             table = await resource.Table(self.table.name)
-            response = await table.scan(**params)
+            return await table.scan(**params)
+
+        response = await self._run_async(_op)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
 
         result: dict[str, Any] = {
