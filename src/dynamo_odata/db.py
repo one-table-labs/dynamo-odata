@@ -5,20 +5,51 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import time
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, TypeVar
 
 import boto3
 from boto3.dynamodb.conditions import Attr, ConditionBase, Key
+from botocore.exceptions import ConnectionError as BotoConnectionError
+from botocore.exceptions import HTTPClientError
 
 from .dynamo_filter import build_filter
 from .guardrails import FilterPolicy, PartitionKeyGuard
 from .projection import build_projection
 from .schema import KeySchema
+
+logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+
+
+def _is_stale_connection_error(exc: BaseException) -> bool:
+    """True if ``exc`` indicates the (shared) async resource's connection/session
+    is dead — i.e. the request never reached DynamoDB and is safe to retry once
+    on a fresh resource.
+
+    Covers botocore transport errors — ``ConnectionError`` (and its
+    ``EndpointConnectionError`` …) plus ``HTTPClientError`` (and its
+    ``ConnectionClosedError`` / ``ReadTimeoutError`` …) — aiohttp client errors,
+    and the ``RuntimeError("... is closed")`` / ``"Event loop is closed"`` family
+    raised by aiobotocore/aiohttp when a long-lived client has been torn down.
+    """
+    if isinstance(exc, (BotoConnectionError, HTTPClientError)):
+        return True
+    try:  # aiohttp is a transitive dep via aioboto3; import lazily.
+        import aiohttp
+
+        if isinstance(exc, aiohttp.ClientError):
+            return True
+    except ImportError:  # pragma: no cover - aiohttp always present with aioboto3
+        pass
+    return isinstance(exc, RuntimeError) and "closed" in str(exc).lower()
 
 
 def _get_aioboto3_session(async_session: Any = None) -> Any:
@@ -151,6 +182,37 @@ class DynamoDb:
             session = self._get_aioboto3_session()
             async with session.resource("dynamodb", **self._async_resource_kwargs()) as resource:
                 yield resource
+
+    async def _run_async(self, op: Callable[[Any], Awaitable[_T]]) -> _T:
+        """Run ``op(resource)`` against a DynamoDB async resource, self-healing a
+        stale shared resource.
+
+        When a long-lived shared resource is in use (set via ``__aenter__`` or
+        injected by the host app) its session/connection can go stale in a
+        long-running process; the call then fails client-side before reaching
+        DynamoDB. On such a connection error we discard the stale shared resource
+        and retry the operation once on a freshly-created per-call resource.
+
+        Operations that already use a fresh per-call resource, and non-connection
+        errors (e.g. ``ClientError``), are never retried — they propagate.
+        """
+        try:
+            async with self._async_resource() as resource:
+                return await op(resource)
+        except Exception as exc:
+            if self._shared_resource is None or not _is_stale_connection_error(exc):
+                raise
+            logger.warning(
+                "dynamo-odata: shared async DynamoDB resource appears stale (%s); "
+                "discarding it and retrying once on a fresh resource",
+                type(exc).__name__,
+            )
+            # Stop using the dead shared resource on this instance.
+            self._shared_resource = None
+            self._resource_cm = None
+            session = self._get_aioboto3_session()
+            async with session.resource("dynamodb", **self._async_resource_kwargs()) as resource:
+                return await op(resource)
 
     async def __aenter__(self) -> DynamoDb:
         session = self._get_aioboto3_session()
@@ -458,15 +520,15 @@ class DynamoDb:
                     table_spec["ExpressionAttributeNames"] = expr_attr_names
 
         batch_chunk = 100
-        all_items: list[dict[str, Any]] = []
-        pending_keys = keys
-        retry_delay = 0.0
 
-        async with self._async_resource() as resource:
-            while pending_keys:
-                chunk, pending_keys = (
-                    pending_keys[:batch_chunk],
-                    pending_keys[batch_chunk:],
+        async def _op(resource: Any) -> list[dict[str, Any]]:
+            op_items: list[dict[str, Any]] = []
+            op_pending = list(keys)
+            op_retry_delay = 0.0
+            while op_pending:
+                chunk, op_pending = (
+                    op_pending[:batch_chunk],
+                    op_pending[batch_chunk:],
                 )
                 request_items: dict[str, Any] = {table_name: {**table_spec, "Keys": chunk}}
                 response = await resource.batch_get_item(
@@ -474,16 +536,18 @@ class DynamoDb:
                     ReturnConsumedCapacity="TOTAL",
                 )
                 self.add_consumed_capacity(response.get("ConsumedCapacity"))
-                all_items.extend(response.get("Responses", {}).get(table_name, []))
+                op_items.extend(response.get("Responses", {}).get(table_name, []))
 
                 unprocessed = response.get("UnprocessedKeys", {})
                 if unprocessed and table_name in unprocessed:
-                    retry_delay = min(retry_delay * 2 if retry_delay else 0.05, 1.0)
-                    await asyncio.sleep(retry_delay)
-                    pending_keys = unprocessed[table_name]["Keys"] + pending_keys
+                    op_retry_delay = min(op_retry_delay * 2 if op_retry_delay else 0.05, 1.0)
+                    await asyncio.sleep(op_retry_delay)
+                    op_pending = unprocessed[table_name]["Keys"] + op_pending
                 else:
-                    retry_delay = 0.0
+                    op_retry_delay = 0.0
+            return op_items
 
+        all_items = await self._run_async(_op)
         if item_only:
             return all_items
         return {"Responses": {table_name: all_items}}
@@ -516,9 +580,11 @@ class DynamoDb:
                 if expr_attr_names:
                     params["ExpressionAttributeNames"] = expr_attr_names
 
-        async with self._async_resource() as resource:
+        async def _op(resource: Any) -> dict[str, Any]:
             table = await resource.Table(self.table.name)
-            response = await table.get_item(**params)
+            return await table.get_item(**params)
+
+        response = await self._run_async(_op)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
         item = response.get("Item")
         if item is None:
@@ -595,32 +661,37 @@ class DynamoDb:
         if start_key is not None:
             params["ExclusiveStartKey"] = start_key
 
-        items: list[dict[str, Any]] = []
-        async with self._async_resource() as resource:
+        async def _op(resource: Any) -> tuple[list[dict[str, Any]], str | None]:
+            # Local copy so a self-heal retry (which re-runs _op) starts from the
+            # original params, not a mutated mid-pagination state.
+            query_params = dict(params)
             table = await resource.Table(self.table.name)
+            items: list[dict[str, Any]] = []
 
             if fetch_all:
-                params["Limit"] = 500
+                query_params["Limit"] = 500
                 last_key: Any = True
                 while last_key is not None:
-                    result = await table.query(**params)
+                    result = await table.query(**query_params)
                     self.add_consumed_capacity(result.get("ConsumedCapacity"))
                     items.extend(result.get("Items", []))
                     last_key = result.get("LastEvaluatedKey")
                     if last_key:
-                        params["ExclusiveStartKey"] = last_key
+                        query_params["ExclusiveStartKey"] = last_key
                     else:
-                        params.pop("ExclusiveStartKey", None)
+                        query_params.pop("ExclusiveStartKey", None)
                 return items, None
 
-            params["Limit"] = limit
-            result = await table.query(**params)
+            query_params["Limit"] = limit
+            result = await table.query(**query_params)
             self.add_consumed_capacity(result.get("ConsumedCapacity"))
             items = result.get("Items", [])
             next_cursor: str | None = None
             if last_evaluated := result.get("LastEvaluatedKey"):
                 next_cursor = self._encode_cursor(last_evaluated)
             return items, next_cursor
+
+        return await self._run_async(_op)
 
     def put(
         self,
@@ -738,9 +809,11 @@ class DynamoDb:
         if expression_attribute_names:
             params["ExpressionAttributeNames"] = expression_attribute_names
 
-        async with self._async_resource() as resource:
+        async def _op(resource: Any) -> dict[str, Any]:
             table = await resource.Table(self.table.name)
-            response = await table.update_item(**params)
+            return await table.update_item(**params)
+
+        response = await self._run_async(_op)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
         if item_only and "Attributes" in response:
             return response["Attributes"]
@@ -775,9 +848,12 @@ class DynamoDb:
         body = self._convert_to_decimal(dict(item))
         body = self._strip_key_attributes(body)
         full_item = {self.partition_key_name: pk, self.sort_key_name: sk, **body}
-        async with self._async_resource() as resource:
+
+        async def _op(resource: Any) -> None:
             table = await resource.Table(self.table.name)
             await table.put_item(Item=full_item, ReturnConsumedCapacity="TOTAL")
+
+        await self._run_async(_op)
 
     def create_item(self, pk: str, sk: str, item: dict[str, Any]) -> None:
         """
@@ -816,13 +892,16 @@ class DynamoDb:
         body = self._convert_to_decimal(dict(item))
         body = self._strip_key_attributes(body)
         full_item = {self.partition_key_name: pk, self.sort_key_name: sk, **body}
-        async with self._async_resource() as resource:
+
+        async def _op(resource: Any) -> None:
             table = await resource.Table(self.table.name)
             await table.put_item(
                 Item=full_item,
                 ConditionExpression=Attr(self.partition_key_name).not_exists(),
                 ReturnConsumedCapacity="TOTAL",
             )
+
+        await self._run_async(_op)
 
     def update_item(self, pk: str, sk: str, updates: dict[str, Any]) -> dict[str, Any]:
         """
@@ -894,9 +973,12 @@ class DynamoDb:
             "ReturnValues": "ALL_NEW",
             "ReturnConsumedCapacity": "TOTAL",
         }
-        async with self._async_resource() as resource:
+
+        async def _op(resource: Any) -> dict[str, Any]:
             table = await resource.Table(self.table.name)
-            response = await table.update_item(**params)
+            return await table.update_item(**params)
+
+        response = await self._run_async(_op)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
         return response.get("Attributes", {})
 
@@ -924,9 +1006,10 @@ class DynamoDb:
     async def _batch_purge_keys_async(self, keys: list[dict[str, str]]) -> None:
         """Async version of _batch_purge_keys."""
         table_name = self.table.name
-        pending = list(keys)
-        retry_delay = 0.0
-        async with self._async_resource() as resource:
+
+        async def _op(resource: Any) -> None:
+            pending = list(keys)
+            retry_delay = 0.0
             while pending:
                 chunk, pending = pending[:25], pending[25:]
                 request_items: dict[str, Any] = {table_name: [{"DeleteRequest": {"Key": k}} for k in chunk]}
@@ -942,6 +1025,8 @@ class DynamoDb:
                     pending = [req["DeleteRequest"]["Key"] for req in unprocessed] + pending
                 else:
                     retry_delay = 0.0
+
+        await self._run_async(_op)
 
     def delete(
         self,
@@ -1049,13 +1134,15 @@ class DynamoDb:
                     new_record[key] = value
             await self.put_async(pk=pk, sk=new_sk, data=new_record)
 
-        async with self._async_resource() as resource:
+        async def _op(resource: Any) -> dict[str, Any]:
             table = await resource.Table(self.table.name)
-            response = await table.delete_item(
+            return await table.delete_item(
                 Key=self._key_dict(pk, sk),
                 ReturnValues="ALL_OLD",
                 ReturnConsumedCapacity="TOTAL",
             )
+
+        response = await self._run_async(_op)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
         return response
 
@@ -1120,13 +1207,16 @@ class DynamoDb:
             raise ValueError("Either sk or sk_begins_with must be provided")
 
         if is_purge:
-            async with self._async_resource() as resource:
+
+            async def _op(resource: Any) -> dict[str, Any]:
                 table = await resource.Table(self.table.name)
-                response = await table.delete_item(
+                return await table.delete_item(
                     Key=self._key_dict(pk, sk),
                     ReturnValues="ALL_OLD",
                     ReturnConsumedCapacity="TOTAL",
                 )
+
+            response = await self._run_async(_op)
             self.add_consumed_capacity(response.get("ConsumedCapacity"))
             return response
 
@@ -1349,9 +1439,11 @@ class DynamoDb:
         if cursor is not None:
             params["ExclusiveStartKey"] = self._decode_cursor(cursor)
 
-        async with self._async_resource() as resource:
+        async def _op(resource: Any) -> dict[str, Any]:
             table = await resource.Table(self.table.name)
-            response = await table.query(**params)
+            return await table.query(**params)
+
+        response = await self._run_async(_op)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
         items = response.get("Items", [])
 
@@ -1485,9 +1577,11 @@ class DynamoDb:
         if skip_token is not None:
             params["ExclusiveStartKey"] = skip_token
 
-        async with self._async_resource() as resource:
+        async def _op(resource: Any) -> dict[str, Any]:
             table = await resource.Table(self.table.name)
-            response = await table.scan(**params)
+            return await table.scan(**params)
+
+        response = await self._run_async(_op)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
 
         result: dict[str, Any] = {
