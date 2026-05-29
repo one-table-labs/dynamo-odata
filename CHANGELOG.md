@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-05-29
+
+### Fixed
+
+- **Self-heal a stale shared async resource** — in a long-running process that reuses one
+  app-wide aioboto3 DynamoDB *resource* (set via `async with DynamoDb(...)` or injected by the
+  host app), the shared resource's session/connection can go stale after hours of uptime. The
+  next resource-based async call then failed **client-side before reaching DynamoDB** (no DynamoDB
+  error recorded), and botocore retries could not recover it — while fresh-client paths
+  (`transact_write_async`, sync calls) kept working. All async operations now run through a
+  `_run_async` helper that, on a client-side transport error (`ConnectionError`/`HTTPClientError`,
+  aiohttp `ClientError`, or a closed-client/closed-loop `RuntimeError`) while a shared resource is
+  in use, discards the stale shared resource and retries the operation **once** on a freshly
+  created per-call resource. Non-connection errors (e.g. `ClientError`) and per-call resources are
+  never retried. Paginating reads reset their accumulators on retry, so recovery never drops or
+  duplicates items. No public API change. ([#35](https://github.com/one-table-labs/dynamo-odata/issues/35))
+
+---
+
 ## [0.8.0] - 2026-05-02
 
 ### Added
