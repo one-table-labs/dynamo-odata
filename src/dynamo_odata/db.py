@@ -149,9 +149,7 @@ class DynamoDb:
             return json.loads(base64.b64decode(payload.encode()).decode())
         return json.loads(base64.b64decode(cursor.encode()).decode())
 
-    def _resolve_start_key(
-        self, cursor: str | None, skip_token: dict[str, Any] | None
-    ) -> dict[str, Any] | None:
+    def _resolve_start_key(self, cursor: str | None, skip_token: dict[str, Any] | None) -> dict[str, Any] | None:
         """Resolve the ``ExclusiveStartKey`` for a paginated query.
 
         ``cursor`` is an opaque (optionally signed) base64 string decoded into a
