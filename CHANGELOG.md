@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-06-15
+
+### Fixed
+
+- **Reject a non-dict `skip_token` at the call boundary** — `get_all` / `get_all_async`
+  accept either an opaque `cursor` string or a raw `LastEvaluatedKey` `skip_token` dict
+  (the latter deprecated). A caller that mistakenly passed a base64 **cursor string** into
+  `skip_token` got no error at the call site; the string flowed verbatim to boto3 as
+  `ExclusiveStartKey`, which only then rejected it (must be a mapping), 500ing at request
+  time. Both methods now validate `skip_token` is a `dict` (or `None`) up front and raise a
+  clear `TypeError` pointing the caller at `cursor`. Valid `dict` skip-tokens and all
+  `cursor`-based pagination are unaffected. Start-key resolution for both the sync and async
+  paths is consolidated in one `_resolve_start_key` helper. No other public API change.
+
 ## [0.8.1] - 2026-05-29
 
 ### Fixed

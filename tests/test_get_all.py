@@ -174,3 +174,84 @@ class TestGetAllAsync:
 
         assert items == [{"pk": "a"}]
         assert cursor is not None
+
+
+class TestSkipTokenValidation:
+    """``skip_token`` is a raw LastEvaluatedKey dict. A caller that passes a
+    base64 cursor string into it must fail fast at the call boundary with a
+    clear ``TypeError`` rather than letting the string flow to boto3 and 500
+    at request time."""
+
+    def test_get_all_rejects_string_skip_token(self):
+        db = _make_db()
+
+        try:
+            db.get_all("user::t1", skip_token="eyJwayI6ICJhIn0=")  # noqa: S106
+            raise AssertionError("expected TypeError")
+        except TypeError as exc:
+            assert "skip_token" in str(exc)
+
+        db.table.query.assert_not_called()
+
+    def test_get_all_rejects_non_dict_skip_token(self):
+        db = _make_db()
+
+        for bad in ([{"pk": "a"}], 42, ("pk", "a")):
+            try:
+                db.get_all("user::t1", skip_token=bad)
+                raise AssertionError(f"expected TypeError for {bad!r}")
+            except TypeError:
+                pass
+
+        db.table.query.assert_not_called()
+
+    def test_get_all_accepts_dict_skip_token(self):
+        db = _make_db()
+        db.table.query.return_value = {"Items": [{"pk": "b"}], "Count": 1}
+
+        items, _ = db.get_all("user::t1", skip_token={"pk": "a", "sk": "1#x"})
+
+        assert items == [{"pk": "b"}]
+        assert db.table.query.call_args.kwargs["ExclusiveStartKey"] == {"pk": "a", "sk": "1#x"}
+
+    def test_get_all_async_rejects_string_skip_token(self):
+        db = _make_db()
+        ctx = self._ctx_never_queries()
+
+        with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
+            mock_session.return_value.resource.return_value = ctx
+            try:
+                asyncio.run(db.get_all_async("user::t1", skip_token="eyJwayI6ICJhIn0="))  # noqa: S106
+                raise AssertionError("expected TypeError")
+            except TypeError as exc:
+                assert "skip_token" in str(exc)
+
+    def test_get_all_async_accepts_dict_skip_token(self):
+        db = _make_db()
+        mock_table = AsyncMock()
+        mock_table.query.return_value = {"Items": [{"pk": "b"}], "Count": 1}
+        mock_resource = AsyncMock()
+        mock_resource.Table.return_value = mock_table
+        ctx = AsyncMock()
+        ctx.__aenter__.return_value = mock_resource
+        ctx.__aexit__.return_value = False
+
+        with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
+            mock_session.return_value.resource.return_value = ctx
+            items, _ = asyncio.run(db.get_all_async("user::t1", skip_token={"pk": "a", "sk": "1#x"}))
+
+        assert items == [{"pk": "b"}]
+        assert mock_table.query.call_args.kwargs["ExclusiveStartKey"] == {"pk": "a", "sk": "1#x"}
+
+    @staticmethod
+    def _ctx_never_queries() -> AsyncMock:
+        """A resource context whose table would raise if queried — proves the
+        TypeError fires before any DynamoDB call."""
+        mock_table = AsyncMock()
+        mock_table.query.side_effect = AssertionError("query must not be called")
+        mock_resource = AsyncMock()
+        mock_resource.Table.return_value = mock_table
+        ctx = AsyncMock()
+        ctx.__aenter__.return_value = mock_resource
+        ctx.__aexit__.return_value = False
+        return ctx
