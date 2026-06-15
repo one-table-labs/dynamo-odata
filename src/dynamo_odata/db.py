@@ -149,6 +149,31 @@ class DynamoDb:
             return json.loads(base64.b64decode(payload.encode()).decode())
         return json.loads(base64.b64decode(cursor.encode()).decode())
 
+    def _resolve_start_key(self, cursor: str | None, skip_token: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Resolve the ``ExclusiveStartKey`` for a paginated query.
+
+        ``cursor`` is an opaque (optionally signed) base64 string decoded into a
+        ``LastEvaluatedKey``.  ``skip_token`` (deprecated) is a raw
+        ``LastEvaluatedKey`` dict forwarded verbatim.
+
+        ``skip_token`` must be a ``dict`` (or ``None``).  A caller that passes a
+        base64 cursor string into ``skip_token`` would otherwise sail past the
+        call site and only fail deep in boto3 (``ExclusiveStartKey`` must be a
+        mapping), 500ing at request time.  Reject it here with a clear
+        ``TypeError`` so the mistake surfaces at the call boundary.
+        """
+        if cursor is not None:
+            return self._decode_cursor(cursor)
+        if skip_token is not None:
+            if not isinstance(skip_token, dict):
+                raise TypeError(
+                    "skip_token must be a LastEvaluatedKey dict (or None); got "
+                    f"{type(skip_token).__name__}. Pass an opaque cursor string via "
+                    "the 'cursor' argument instead."
+                )
+            return skip_token
+        return None
+
     def encode_offset_cursor(self, offset: int) -> str:
         """Return an opaque cursor representing a Python-side pagination offset."""
         return self._encode_cursor({"__type": "offset", "offset": offset})
@@ -365,6 +390,11 @@ class DynamoDb:
             cursor: Opaque base64 pagination cursor from a previous call.  Mutually
                 exclusive with ``skip_token``.
             skip_token: Raw ``LastEvaluatedKey`` dict (deprecated — use ``cursor``).
+                Must be a ``dict`` or ``None``; passing anything else (e.g. a
+                base64 cursor string) raises ``TypeError`` at the call boundary.
+
+        Raises:
+            TypeError: If ``skip_token`` is neither a ``dict`` nor ``None``.
         """
         self._validate_partition_key(pk)
         del next_link
@@ -410,11 +440,7 @@ class DynamoDb:
                 if expr_attr_names:
                     params["ExpressionAttributeNames"] = expr_attr_names
 
-        start_key: dict[str, Any] | None = None
-        if cursor is not None:
-            start_key = self._decode_cursor(cursor)
-        elif skip_token is not None:
-            start_key = skip_token
+        start_key = self._resolve_start_key(cursor, skip_token)
         if start_key is not None:
             params["ExclusiveStartKey"] = start_key
 
@@ -653,11 +679,7 @@ class DynamoDb:
                 if expr_attr_names:
                     params["ExpressionAttributeNames"] = expr_attr_names
 
-        start_key: dict[str, Any] | None = None
-        if cursor is not None:
-            start_key = self._decode_cursor(cursor)
-        elif skip_token is not None:
-            start_key = skip_token
+        start_key = self._resolve_start_key(cursor, skip_token)
         if start_key is not None:
             params["ExclusiveStartKey"] = start_key
 
