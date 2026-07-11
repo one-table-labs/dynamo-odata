@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-11
+
+### Added
+
+- **Exact-match support in `PartitionKeyGuard`** — new `allowed_exact` tuple alongside
+  `allowed_prefixes`. Prefix matching is `startswith`-based, so a guard configured with
+  `allowed_prefixes=("AGREEMENT",)` also admitted sibling partitions such as
+  `AGREEMENT_DOC`. `allowed_exact` values must match the partition key exactly, and the
+  two rule sets can be combined; at least one non-empty rule is required. Existing
+  positional `PartitionKeyGuard(("TENANT#",))` construction is unchanged. Validation
+  error messages now describe both rule sets.
+
 ## [0.8.2] - 2026-06-15
 
 ### Fixed
