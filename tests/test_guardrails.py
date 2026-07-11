@@ -82,6 +82,55 @@ class TestPartitionKeyGuard:
 
         assert result == {"pk": "TENANT#1", "sk": "1#USER#1"}
 
+    def test_exact_match_allows_exact_key(self):
+        guard = PartitionKeyGuard(allowed_exact=("AGREEMENT",))
+
+        guard.validate("AGREEMENT")
+
+    def test_exact_match_rejects_prefix_extension(self):
+        guard = PartitionKeyGuard(allowed_exact=("AGREEMENT",))
+
+        with pytest.raises(PartitionKeyValidationError, match="AGREEMENT_DOC"):
+            guard.validate("AGREEMENT_DOC")
+
+    def test_exact_and_prefixes_combined(self):
+        guard = PartitionKeyGuard(allowed_prefixes=("TENANT#",), allowed_exact=("AGREEMENT",))
+
+        guard.validate("TENANT#1")
+        guard.validate("AGREEMENT")
+
+        with pytest.raises(PartitionKeyValidationError):
+            guard.validate("AGREEMENT_DOC")
+
+    def test_requires_at_least_one_rule(self):
+        with pytest.raises(ValueError, match="at least one"):
+            PartitionKeyGuard()
+
+    def test_empty_strings_are_ignored(self):
+        with pytest.raises(ValueError, match="at least one"):
+            PartitionKeyGuard(allowed_prefixes=("",), allowed_exact=("",))
+
+    def test_error_message_lists_exact_values(self):
+        guard = PartitionKeyGuard(allowed_exact=("AGREEMENT",))
+
+        with pytest.raises(PartitionKeyValidationError, match="exactly match one of: AGREEMENT"):
+            guard.validate("OTHER")
+
+    def test_error_message_lists_prefixes_and_exact_values(self):
+        guard = PartitionKeyGuard(allowed_prefixes=("TENANT#",), allowed_exact=("AGREEMENT",))
+
+        with pytest.raises(
+            PartitionKeyValidationError,
+            match=r"start with one of: TENANT#.*exactly match one of: AGREEMENT",
+        ):
+            guard.validate("OTHER")
+
+    def test_db_enforces_exact_match_guard(self):
+        db = _make_db(partition_key_guard=PartitionKeyGuard(allowed_exact=("AGREEMENT",)))
+
+        with pytest.raises(PartitionKeyValidationError):
+            db.get_all("AGREEMENT_DOC")
+
     def test_db_filter_policy_is_enforced_on_get_all(self):
         db = _make_db(filter_policy=FilterPolicy(allowed_fields=frozenset({"status"})))
 

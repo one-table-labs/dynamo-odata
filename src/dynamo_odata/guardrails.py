@@ -16,19 +16,28 @@ class FilterPolicyViolationError(ValueError):
 
 @dataclass(frozen=True)
 class PartitionKeyGuard:
-    allowed_prefixes: tuple[str, ...]
+    allowed_prefixes: tuple[str, ...] = ()
+    allowed_exact: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         prefixes = tuple(prefix for prefix in self.allowed_prefixes if prefix)
-        if not prefixes:
-            raise ValueError("allowed_prefixes must contain at least one non-empty prefix")
+        exact = tuple(value for value in self.allowed_exact if value)
+        if not prefixes and not exact:
+            raise ValueError("PartitionKeyGuard requires at least one non-empty prefix or exact value")
         object.__setattr__(self, "allowed_prefixes", prefixes)
+        object.__setattr__(self, "allowed_exact", exact)
 
     def validate(self, partition_key: str) -> None:
+        if partition_key in self.allowed_exact:
+            return
         if any(partition_key.startswith(prefix) for prefix in self.allowed_prefixes):
             return
-        allowed = ", ".join(self.allowed_prefixes)
-        raise PartitionKeyValidationError(f"Partition key {partition_key!r} must start with one of: {allowed}")
+        rules = []
+        if self.allowed_prefixes:
+            rules.append(f"start with one of: {', '.join(self.allowed_prefixes)}")
+        if self.allowed_exact:
+            rules.append(f"exactly match one of: {', '.join(self.allowed_exact)}")
+        raise PartitionKeyValidationError(f"Partition key {partition_key!r} must {' or '.join(rules)}")
 
 
 @dataclass(frozen=True)

@@ -232,6 +232,19 @@ items = db.get_all("TENANT#tenant1", filter="status eq 'active'", item_only=True
 # db.get_all("DISEASE#123", filter="contains(notes, 'x')", item_only=True)
 ```
 
+Prefix matching is `startswith`-based, so `allowed_prefixes=("AGREEMENT",)` also admits
+sibling partitions like `AGREEMENT_DOC`. When a partition key is a fixed literal rather
+than a namespace prefix, use `allowed_exact` instead (either alone or combined with
+`allowed_prefixes`):
+
+```python
+# Only the literal "AGREEMENT" partition — "AGREEMENT_DOC" is rejected
+guard = PartitionKeyGuard(allowed_exact=("AGREEMENT",))
+
+# Prefix and exact rules can be combined
+guard = PartitionKeyGuard(allowed_prefixes=("TENANT#",), allowed_exact=("AGREEMENT",))
+```
+
 ### Regulated Environment Profile Helpers
 
 For API layers that need repeatable controls, use the optional regulated profile helpers:
