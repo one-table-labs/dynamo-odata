@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-07-22
+
+### Fixed
+
+- **`transact_write` / `transact_write_async` now accept up to 100 operations** —
+  the previous 25-operation guard encoded DynamoDB's pre-September-2022
+  `TransactWriteItems` limit; AWS raised it to 100 items. A 50-operation
+  transaction (e.g. a multi-module content publish) was rejected client-side even
+  though DynamoDB accepts it. Empty-input validation is unchanged; >100 still
+  raises `ValueError`.
+
 ## [0.9.0] - 2026-07-11
 
 ### Added

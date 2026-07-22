@@ -202,11 +202,28 @@ class TestTransactWrite:
         with pytest.raises(ValueError, match="at least one"):
             db.transact_write([])
 
-    def test_transact_write_over_25_raises(self):
+    def test_transact_write_accepts_50_operations(self):
+        # DynamoDB raised the TransactWriteItems cap from 25 to 100 in Sept 2022;
+        # 50 ops is a real workload (condition publish with ~24 modules).
         db = _make_db()
-        ops = [{"Put": {"Item": {}}} for _ in range(26)]
-        with pytest.raises(ValueError, match="25"):
+        ops = [{"Put": {"Item": {"PK": "T#1", "SK": f"1#U#{i}"}}} for i in range(50)]
+
+        db.transact_write(ops)
+
+        sent = db.table.meta.client.transact_write_items.call_args.kwargs["TransactItems"]
+        assert len(sent) == 50
+
+    def test_transact_write_over_100_raises(self):
+        db = _make_db()
+        ops = [{"Put": {"Item": {}}} for _ in range(101)]
+        with pytest.raises(ValueError, match="100"):
             db.transact_write(ops)
+
+    def test_transact_write_async_over_100_raises(self):
+        db = _make_db()
+        ops = [{"Put": {"Item": {}}} for _ in range(101)]
+        with pytest.raises(ValueError, match="100"):
+            asyncio.run(db.transact_write_async(ops))
 
     def test_transact_write_async(self):
         db = _make_db()
