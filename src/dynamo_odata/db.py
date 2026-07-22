@@ -1477,7 +1477,7 @@ class DynamoDb:
 
     def transact_write(self, operations: list[dict[str, Any]]) -> None:
         """
-        Execute an atomic multi-item write (up to 25 items per DynamoDB limit).
+        Execute an atomic multi-item write (up to 100 items per DynamoDB limit).
 
         Each operation is a dict in DynamoDB transact_write format::
 
@@ -1488,15 +1488,17 @@ class DynamoDb:
         ``TableName`` is injected automatically on every operation.
 
         Args:
-            operations: List of operation dicts. Max 25 items.
+            operations: List of operation dicts. Max 100 items.
 
         Raises:
-            ValueError: If ``operations`` is empty or exceeds 25 items.
+            ValueError: If ``operations`` is empty or exceeds 100 items.
         """
         if not operations:
             raise ValueError("transact_write requires at least one operation")
-        if len(operations) > 25:
-            raise ValueError(f"transact_write supports up to 25 operations, got {len(operations)}")
+        if len(operations) > 100:
+            raise ValueError(
+                f"transact_write supports up to 100 operations, got {len(operations)}"
+            )
 
         client = self.table.meta.client
         table_name = self.table.name
@@ -1514,8 +1516,10 @@ class DynamoDb:
         """Async version of :meth:`transact_write`."""
         if not operations:
             raise ValueError("transact_write requires at least one operation")
-        if len(operations) > 25:
-            raise ValueError(f"transact_write supports up to 25 operations, got {len(operations)}")
+        if len(operations) > 100:
+            raise ValueError(
+                f"transact_write supports up to 100 operations, got {len(operations)}"
+            )
 
         table_name = self.table.name
         typed_ops = []
