@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-07-26
+
+### Added
+
+- **`select` (projection) passthrough on `query_gsi` / `query_gsi_async`** — the GSI
+  query methods had no way to limit the attributes DynamoDB returns, so a caller that
+  needed one attribute off an `ALL`-projected index paid to read whole items on every
+  page. `get_all` already accepted `select`, but it cannot key-condition on an LSI sort
+  key, so there was no way to get both an index-scoped read and a projection. `select`
+  takes a comma-separated string or a list of field names and is sent as a
+  `ProjectionExpression`; omitting it returns whole items exactly as before. It is the
+  last keyword parameter, so existing positional calls are unaffected. Filters still
+  apply before projection, and pagination is unchanged — `LastEvaluatedKey` carries the
+  key attributes whether or not `select` names them.
+
+### Changed
+
+- The four copies of the projection-building block (`get_all`, `get_all_async`,
+  `scan_all_paginated`, `scan_all_paginated_async`) now share one
+  `_apply_projection` helper with the two new call sites. Behaviour is unchanged; the
+  helper merges into any existing `ExpressionAttributeNames` instead of replacing it.
+
 ## [0.9.1] - 2026-07-22
 
 ### Fixed

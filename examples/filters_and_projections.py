@@ -93,3 +93,13 @@ items, cursor = db.query_gsi(
     filter="role eq 'admin'",
 )
 print(f"GSI result: {len(items)} item(s)")
+
+# GSI query projecting a single attribute — on an ALL-projected index this is the
+# difference between reading whole items and reading the one field you need.
+ids, cursor = db.query_gsi(
+    index_name="by-owner-index",
+    pk_attr="owner_user_id",
+    pk_value="user-123",
+    select="project_id",
+)
+print(f"Owned project ids: {[i['project_id'] for i in ids]}")

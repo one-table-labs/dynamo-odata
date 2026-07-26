@@ -131,6 +131,79 @@ class TestQueryGsi:
         call_kwargs = db.table.query.call_args.kwargs
         assert "FilterExpression" in call_kwargs
 
+    def test_gsi_select_string_sends_projection(self):
+        db = _make_db()
+        db.table.query.return_value = {"Items": [], "ConsumedCapacity": None}
+
+        db.query_gsi(
+            index_name="lsi-s2-index",
+            pk_attr="PK",
+            pk_value="TENANT#t1",
+            select="project_id, name",
+        )
+
+        call_kwargs = db.table.query.call_args.kwargs
+        assert call_kwargs["ProjectionExpression"] == "#project_id,#name"
+        assert call_kwargs["ExpressionAttributeNames"] == {
+            "#project_id": "project_id",
+            "#name": "name",
+        }
+
+    def test_gsi_select_list_sends_projection(self):
+        db = _make_db()
+        db.table.query.return_value = {"Items": [], "ConsumedCapacity": None}
+
+        db.query_gsi(
+            index_name="lsi-s2-index",
+            pk_attr="PK",
+            pk_value="TENANT#t1",
+            select=["project_id"],
+        )
+
+        call_kwargs = db.table.query.call_args.kwargs
+        assert call_kwargs["ProjectionExpression"] == "#project_id"
+        assert call_kwargs["ExpressionAttributeNames"] == {"#project_id": "project_id"}
+
+    def test_gsi_without_select_sends_no_projection(self):
+        db = _make_db()
+        db.table.query.return_value = {"Items": [], "ConsumedCapacity": None}
+
+        db.query_gsi(
+            index_name="tenant-slug-index",
+            pk_attr="tenantSlug",
+            pk_value="acme",
+        )
+
+        call_kwargs = db.table.query.call_args.kwargs
+        assert "ProjectionExpression" not in call_kwargs
+        assert "ExpressionAttributeNames" not in call_kwargs
+
+    def test_gsi_select_paginates_and_filters(self):
+        # Projection must not disturb the cursor (DynamoDB always returns the key
+        # attributes in LastEvaluatedKey) or the filter, which DynamoDB applies
+        # before projection.
+        db = _make_db()
+        last_key = {"PK": "TENANT#t1", "SK": "1#p9", "lsis2": "u1"}
+        db.table.query.return_value = {
+            "Items": [{"project_id": "p9"}],
+            "LastEvaluatedKey": last_key,
+            "ConsumedCapacity": None,
+        }
+
+        items, cursor = db.query_gsi(
+            index_name="lsi-s2-index",
+            pk_attr="PK",
+            pk_value="TENANT#t1",
+            filter="status eq 'ACTIVE'",
+            select="project_id",
+        )
+
+        assert items == [{"project_id": "p9"}]
+        assert json.loads(base64.b64decode(cursor.encode()).decode()) == last_key
+        call_kwargs = db.table.query.call_args.kwargs
+        assert call_kwargs["ProjectionExpression"] == "#project_id"
+        assert "FilterExpression" in call_kwargs
+
     def test_gsi_scan_index_forward_false(self):
         db = _make_db()
         db.table.query.return_value = {"Items": [], "ConsumedCapacity": None}
@@ -176,6 +249,49 @@ class TestQueryGsiAsync:
 
         assert len(items) == 1
         assert cursor is None
+
+    def test_async_gsi_select_sends_projection(self):
+        db = _make_db()
+        ctx = self._make_async_ctx({"Items": [{"project_id": "p1"}], "ConsumedCapacity": None})
+
+        with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
+            mock_session.return_value.resource.return_value = ctx
+
+            items, _ = asyncio.run(
+                db.query_gsi_async(
+                    index_name="lsi-s2-index",
+                    pk_attr="PK",
+                    pk_value="TENANT#t1",
+                    sk_attr="lsis2",
+                    sk_value="u1",
+                    select="project_id",
+                )
+            )
+
+        assert items == [{"project_id": "p1"}]
+        table = ctx.__aenter__.return_value.Table.return_value
+        call_kwargs = table.query.call_args.kwargs
+        assert call_kwargs["ProjectionExpression"] == "#project_id"
+        assert call_kwargs["ExpressionAttributeNames"] == {"#project_id": "project_id"}
+
+    def test_async_gsi_without_select_sends_no_projection(self):
+        db = _make_db()
+        ctx = self._make_async_ctx({"Items": [], "ConsumedCapacity": None})
+
+        with patch("dynamo_odata.db._get_aioboto3_session") as mock_session:
+            mock_session.return_value.resource.return_value = ctx
+
+            asyncio.run(
+                db.query_gsi_async(
+                    index_name="tenant-slug-index",
+                    pk_attr="tenantSlug",
+                    pk_value="acme",
+                )
+            )
+
+        table = ctx.__aenter__.return_value.Table.return_value
+        call_kwargs = table.query.call_args.kwargs
+        assert "ProjectionExpression" not in call_kwargs
 
 
 # ── transact_write ───────────────────────────────────────────────────────────
