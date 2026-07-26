@@ -25,6 +25,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `scan_all_paginated`, `scan_all_paginated_async`) now share one
   `_apply_projection` helper with the two new call sites. Behaviour is unchanged; the
   helper merges into any existing `ExpressionAttributeNames` instead of replacing it.
+- Dev tooling: `ruff` is pinned to `>=0.16,<0.17` (an unbounded floor let a new ruff
+  reformat the tree under an unrelated PR), and the formatter now skips `*.md`. ruff 0.16
+  formats Python code blocks inside Markdown, which would collapse the column-aligned
+  trailing comments the README uses deliberately; `ruff check` still covers them.
 
 ## [0.9.1] - 2026-07-22
 
