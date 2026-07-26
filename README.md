@@ -646,8 +646,8 @@ db = DynamoDb(
 | `put_item` / `put_item_async` | `pk, sk, item` | None | Unconditional write; does not strip key attrs |
 | `create_item` / `create_item_async` | `pk, sk, item` | None | Conditional write — raises if item already exists |
 | `update_item` / `update_item_async` | `pk, sk, updates` | dict | Partial update (PATCH); returns full item after write |
-| `query_gsi` / `query_gsi_async` | `index_name, pk_attr, pk_value, [sk_*, filter, limit, cursor]` | (list[dict], cursor) | GSI query with optional SK conditions and pagination |
-| `transact_write` / `transact_write_async` | `operations` | None | Atomic multi-item write (up to 25 ops); TableName injected automatically |
+| `query_gsi` / `query_gsi_async` | `index_name, pk_attr, pk_value, [sk_*, filter, select, limit, cursor]` | (list[dict], cursor) | GSI query with optional SK conditions, projection and pagination |
+| `transact_write` / `transact_write_async` | `operations` | None | Atomic multi-item write (up to 100 ops); TableName injected automatically |
 | `restore` / `restore_async` | `pk, sk_body, [restore_data]` | None | Swap SK from `0#` → `1#`, clear deleted_* attrs |
 | `delete` / `delete_async` | `pk, sk` | None | Hard delete |
 | `soft_delete` / `soft_delete_async` | `pk, sk` | None | Soft delete (prefix move) |

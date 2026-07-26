@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dynamo-odata"
-version = "0.9.1"
+version = "0.10.0"
 description = "OData filter and projection helpers for AWS DynamoDB"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,7 +28,10 @@ dependencies = [
 [project.optional-dependencies]
 async = ["aioboto3>=13.0"]
 fastapi = ["fastapi>=0.100", "pydantic>=2.0"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.6", "pre-commit>=3.7", "mypy>=1.11"]
+# ruff is pinned to a minor range: CI runs `ruff format --check`, so an
+# unbounded floor lets a new ruff reformat the tree under an unrelated PR.
+# 0.16 formats Python code blocks inside Markdown, which 0.15 did not.
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.16,<0.17", "pre-commit>=3.7", "mypy>=1.11"]
 
 [project.urls]
 Homepage = "https://github.com/one-table-labs/dynamo-odata"
@@ -48,6 +51,12 @@ where = ["src"]
 [tool.ruff]
 target-version = "py310"
 line-length = 120
+
+[tool.ruff.format]
+# ruff 0.16 formats Python code blocks inside Markdown.  The docs align
+# trailing comments into columns on purpose, which the formatter collapses —
+# keep the formatter off prose files and let `ruff check` still lint them.
+exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = [

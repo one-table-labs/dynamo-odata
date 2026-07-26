@@ -174,6 +174,25 @@ class DynamoDb:
             return skip_token
         return None
 
+    @staticmethod
+    def _apply_projection(params: dict[str, Any], select: str | list[str] | None) -> None:
+        """Add ``ProjectionExpression``/``ExpressionAttributeNames`` to ``params``.
+
+        ``select`` is a comma-separated string or a list of field names; ``None``
+        (or a value that yields no usable field) leaves ``params`` untouched, so
+        the query returns whole items as before.  Every field is aliased through
+        ``ExpressionAttributeNames`` to dodge DynamoDB reserved words; boto3 merges
+        its own generated ``#nN`` condition-expression aliases into that same dict.
+        """
+        if select is None:
+            return
+        fields = [f.strip() for f in select.split(",")] if isinstance(select, str) else list(select)
+        projection_expr, expr_attr_names = build_projection([f for f in fields if f])
+        if projection_expr:
+            params["ProjectionExpression"] = projection_expr
+            if expr_attr_names:
+                params.setdefault("ExpressionAttributeNames", {}).update(expr_attr_names)
+
     def encode_offset_cursor(self, offset: int) -> str:
         """Return an opaque cursor representing a Python-side pagination offset."""
         return self._encode_cursor({"__type": "offset", "offset": offset})
@@ -432,13 +451,7 @@ class DynamoDb:
         if effective_filter is not None:
             params["FilterExpression"] = effective_filter
 
-        if select is not None:
-            select_fields = [field.strip() for field in select.split(",") if field.strip()]
-            projection_expr, expr_attr_names = build_projection(select_fields)
-            if projection_expr:
-                params["ProjectionExpression"] = projection_expr
-                if expr_attr_names:
-                    params["ExpressionAttributeNames"] = expr_attr_names
+        self._apply_projection(params, select)
 
         start_key = self._resolve_start_key(cursor, skip_token)
         if start_key is not None:
@@ -671,13 +684,7 @@ class DynamoDb:
         if effective_filter is not None:
             params["FilterExpression"] = effective_filter
 
-        if select is not None:
-            select_fields = [field.strip() for field in select.split(",") if field.strip()]
-            projection_expr, expr_attr_names = build_projection(select_fields)
-            if projection_expr:
-                params["ProjectionExpression"] = projection_expr
-                if expr_attr_names:
-                    params["ExpressionAttributeNames"] = expr_attr_names
+        self._apply_projection(params, select)
 
         start_key = self._resolve_start_key(cursor, skip_token)
         if start_key is not None:
@@ -1355,6 +1362,7 @@ class DynamoDb:
         cursor: str | None = None,
         scan_index_forward: bool = True,
         item_only: bool = False,
+        select: str | list[str] | None = None,
     ) -> tuple[list[dict[str, Any]], str | None]:
         """
         Query a Global Secondary Index (GSI) by its partition key attribute.
@@ -1373,6 +1381,15 @@ class DynamoDb:
             cursor: Base64-encoded pagination cursor from a previous call.
             scan_index_forward: Sort order (``True`` = ascending).
             item_only: If ``True``, return ``(items, cursor)``; otherwise same.
+            select: Attributes to return, as a comma-separated string or a list of
+                field names — sent as a ``ProjectionExpression``.  Use it when a
+                caller only needs a few attributes off an ``ALL``-projected index;
+                DynamoDB then returns (and bills read capacity on) the projected
+                bytes instead of the whole item.  Filters are applied *before*
+                projection, so ``filter``/``filter_expr`` may reference attributes
+                ``select`` omits.  Pagination is unaffected: ``LastEvaluatedKey``
+                always carries the key attributes, whether or not ``select`` names
+                them.
 
         Returns:
             ``(items, next_cursor)`` — ``next_cursor`` is ``None`` when there are no more pages,
@@ -1403,6 +1420,8 @@ class DynamoDb:
         if effective_filter is not None:
             params["FilterExpression"] = effective_filter
 
+        self._apply_projection(params, select)
+
         if cursor is not None:
             params["ExclusiveStartKey"] = self._decode_cursor(cursor)
 
@@ -1431,6 +1450,7 @@ class DynamoDb:
         cursor: str | None = None,
         scan_index_forward: bool = True,
         item_only: bool = False,
+        select: str | list[str] | None = None,
     ) -> tuple[list[dict[str, Any]], str | None]:
         """Async version of :meth:`query_gsi`."""
         key_cond: Any = Key(pk_attr).eq(pk_value)
@@ -1457,6 +1477,8 @@ class DynamoDb:
             effective_filter = odata_filter & filter_expr if filter_expr is not None else odata_filter
         if effective_filter is not None:
             params["FilterExpression"] = effective_filter
+
+        self._apply_projection(params, select)
 
         if cursor is not None:
             params["ExclusiveStartKey"] = self._decode_cursor(cursor)
@@ -1496,9 +1518,7 @@ class DynamoDb:
         if not operations:
             raise ValueError("transact_write requires at least one operation")
         if len(operations) > 100:
-            raise ValueError(
-                f"transact_write supports up to 100 operations, got {len(operations)}"
-            )
+            raise ValueError(f"transact_write supports up to 100 operations, got {len(operations)}")
 
         client = self.table.meta.client
         table_name = self.table.name
@@ -1517,9 +1537,7 @@ class DynamoDb:
         if not operations:
             raise ValueError("transact_write requires at least one operation")
         if len(operations) > 100:
-            raise ValueError(
-                f"transact_write supports up to 100 operations, got {len(operations)}"
-            )
+            raise ValueError(f"transact_write supports up to 100 operations, got {len(operations)}")
 
         table_name = self.table.name
         typed_ops = []
@@ -1550,16 +1568,7 @@ class DynamoDb:
         if filter is not None:
             params["FilterExpression"] = self._build_filter_expression(filter)
 
-        if select is not None:
-            if isinstance(select, str):
-                select_fields = [field.strip() for field in select.split(",") if field.strip()]
-            else:
-                select_fields = select
-            projection_expr, expr_attr_names = build_projection(select_fields)
-            if projection_expr:
-                params["ProjectionExpression"] = projection_expr
-                if expr_attr_names:
-                    params["ExpressionAttributeNames"] = expr_attr_names
+        self._apply_projection(params, select)
 
         if skip_token is not None:
             params["ExclusiveStartKey"] = skip_token
@@ -1589,16 +1598,7 @@ class DynamoDb:
         if filter is not None:
             params["FilterExpression"] = self._build_filter_expression(filter)
 
-        if select is not None:
-            if isinstance(select, str):
-                select_fields = [field.strip() for field in select.split(",") if field.strip()]
-            else:
-                select_fields = select
-            projection_expr, expr_attr_names = build_projection(select_fields)
-            if projection_expr:
-                params["ProjectionExpression"] = projection_expr
-                if expr_attr_names:
-                    params["ExpressionAttributeNames"] = expr_attr_names
+        self._apply_projection(params, select)
 
         if skip_token is not None:
             params["ExclusiveStartKey"] = skip_token
