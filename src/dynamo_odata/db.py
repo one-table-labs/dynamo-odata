@@ -19,7 +19,7 @@ from boto3.dynamodb.conditions import Attr, ConditionBase, Key
 from botocore.exceptions import ConnectionError as BotoConnectionError
 from botocore.exceptions import HTTPClientError
 
-from .dynamo_filter import build_filter
+from .dynamo_filter import FilterPlan, build_filter_plan
 from .guardrails import FilterPolicy, PartitionKeyGuard
 from .projection import build_projection
 from .schema import KeySchema
@@ -175,7 +175,11 @@ class DynamoDb:
         return None
 
     @staticmethod
-    def _apply_projection(params: dict[str, Any], select: str | list[str] | None) -> None:
+    def _apply_projection(
+        params: dict[str, Any],
+        select: str | list[str] | None,
+        plan: FilterPlan | None = None,
+    ) -> None:
         """Add ``ProjectionExpression``/``ExpressionAttributeNames`` to ``params``.
 
         ``select`` is a comma-separated string or a list of field names; ``None``
@@ -183,10 +187,24 @@ class DynamoDb:
         the query returns whole items as before.  Every field is aliased through
         ``ExpressionAttributeNames`` to dodge DynamoDB reserved words; boto3 merges
         its own generated ``#nN`` condition-expression aliases into that same dict.
+
+        A ``FilterExpression`` is applied before the projection, so ``select`` may
+        legitimately omit the attributes it names — but a *residual* conjunct runs
+        against the returned item, so anything it reads has to be projected or the
+        predicate sees a missing attribute and drops every row.  ``plan``'s
+        residual fields are therefore unioned in; they are stripped from the
+        result by no one, so a caller relying on ``select`` to shrink its response
+        may see those extra attributes.
         """
         if select is None:
             return
         fields = [f.strip() for f in select.split(",")] if isinstance(select, str) else list(select)
+        fields = [f for f in fields if f]
+        if plan is not None and plan.residual_fields:
+            # Add a residual root only when nothing already projects it — DynamoDB
+            # rejects a ProjectionExpression whose paths overlap ("a" and "a.b").
+            existing_roots = {f.split(".", 1)[0] for f in fields}
+            fields.extend(sorted(plan.residual_fields - existing_roots))
         projection_expr, expr_attr_names = build_projection([f for f in fields if f])
         if projection_expr:
             params["ProjectionExpression"] = projection_expr
@@ -294,8 +312,32 @@ class DynamoDb:
         if self.partition_key_guard is not None:
             self.partition_key_guard.validate(pk)
 
-    def _build_filter_expression(self, filter_str: str) -> Any:
-        return build_filter(filter_str, policy=self.filter_policy)
+    def _build_filter_plan(self, filter_str: str) -> FilterPlan:
+        return build_filter_plan(filter_str, policy=self.filter_policy)
+
+    def _resolve_filter(
+        self,
+        filter: str | None,
+        filter_expr: ConditionBase | None = None,
+    ) -> tuple[ConditionBase | None, FilterPlan | None]:
+        """Return ``(FilterExpression, plan)`` for one query.
+
+        ``plan`` is ``None`` when no OData filter was given. When it is not, its
+        residual conjuncts still have to be applied to the returned items — call
+        :meth:`FilterPlan.apply` on every page, including inside a
+        ``fetch_all`` loop.
+        """
+        if filter is None:
+            return filter_expr, None
+        plan = self._build_filter_plan(filter)
+        condition = plan.condition
+        if filter_expr is not None:
+            condition = (condition & filter_expr) if condition is not None else filter_expr
+        return condition, plan
+
+    @staticmethod
+    def _apply_residual(items: list[dict[str, Any]], plan: FilterPlan | None) -> list[dict[str, Any]]:
+        return items if plan is None else plan.apply(items)
 
     def _normalize_sks(self, pk: str, sks: list[str]) -> list[dict[str, str]]:
         return [
@@ -444,14 +486,11 @@ class DynamoDb:
         else:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk)
 
-        effective_filter: ConditionBase | None = filter_expr
-        if filter is not None:
-            odata_expr = self._build_filter_expression(filter)
-            effective_filter = (odata_expr & filter_expr) if filter_expr is not None else odata_expr
+        effective_filter, plan = self._resolve_filter(filter, filter_expr)
         if effective_filter is not None:
             params["FilterExpression"] = effective_filter
 
-        self._apply_projection(params, select)
+        self._apply_projection(params, select, plan)
 
         start_key = self._resolve_start_key(cursor, skip_token)
         if start_key is not None:
@@ -465,7 +504,7 @@ class DynamoDb:
             while last_key is not None:
                 result = self.table.query(**params)
                 self.add_consumed_capacity(result.get("ConsumedCapacity"))
-                items.extend(result.get("Items", []))
+                items.extend(self._apply_residual(result.get("Items", []), plan))
                 last_key = result.get("LastEvaluatedKey")
                 if last_key:
                     params["ExclusiveStartKey"] = last_key
@@ -476,7 +515,7 @@ class DynamoDb:
         params["Limit"] = limit
         result = self.table.query(**params)
         self.add_consumed_capacity(result.get("ConsumedCapacity"))
-        items = result.get("Items", [])
+        items = self._apply_residual(result.get("Items", []), plan)
         next_cursor: str | None = None
         if last_evaluated := result.get("LastEvaluatedKey"):
             next_cursor = self._encode_cursor(last_evaluated)
@@ -677,14 +716,11 @@ class DynamoDb:
         else:
             params["KeyConditionExpression"] = Key(self.partition_key_name).eq(pk)
 
-        effective_filter: ConditionBase | None = filter_expr
-        if filter is not None:
-            odata_expr = self._build_filter_expression(filter)
-            effective_filter = (odata_expr & filter_expr) if filter_expr is not None else odata_expr
+        effective_filter, plan = self._resolve_filter(filter, filter_expr)
         if effective_filter is not None:
             params["FilterExpression"] = effective_filter
 
-        self._apply_projection(params, select)
+        self._apply_projection(params, select, plan)
 
         start_key = self._resolve_start_key(cursor, skip_token)
         if start_key is not None:
@@ -703,7 +739,7 @@ class DynamoDb:
                 while last_key is not None:
                     result = await table.query(**query_params)
                     self.add_consumed_capacity(result.get("ConsumedCapacity"))
-                    items.extend(result.get("Items", []))
+                    items.extend(self._apply_residual(result.get("Items", []), plan))
                     last_key = result.get("LastEvaluatedKey")
                     if last_key:
                         query_params["ExclusiveStartKey"] = last_key
@@ -714,7 +750,7 @@ class DynamoDb:
             query_params["Limit"] = limit
             result = await table.query(**query_params)
             self.add_consumed_capacity(result.get("ConsumedCapacity"))
-            items = result.get("Items", [])
+            items = self._apply_residual(result.get("Items", []), plan)
             next_cursor: str | None = None
             if last_evaluated := result.get("LastEvaluatedKey"):
                 next_cursor = self._encode_cursor(last_evaluated)
@@ -1413,21 +1449,18 @@ class DynamoDb:
         if limit is not None:
             params["Limit"] = limit
 
-        effective_filter = filter_expr
-        if filter is not None:
-            odata_filter = self._build_filter_expression(filter)
-            effective_filter = odata_filter & filter_expr if filter_expr is not None else odata_filter
+        effective_filter, plan = self._resolve_filter(filter, filter_expr)
         if effective_filter is not None:
             params["FilterExpression"] = effective_filter
 
-        self._apply_projection(params, select)
+        self._apply_projection(params, select, plan)
 
         if cursor is not None:
             params["ExclusiveStartKey"] = self._decode_cursor(cursor)
 
         response = self.table.query(**params)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
-        items = response.get("Items", [])
+        items = self._apply_residual(response.get("Items", []), plan)
 
         next_cursor: str | None = None
         if last_key := response.get("LastEvaluatedKey"):
@@ -1471,14 +1504,11 @@ class DynamoDb:
         if limit is not None:
             params["Limit"] = limit
 
-        effective_filter = filter_expr
-        if filter is not None:
-            odata_filter = self._build_filter_expression(filter)
-            effective_filter = odata_filter & filter_expr if filter_expr is not None else odata_filter
+        effective_filter, plan = self._resolve_filter(filter, filter_expr)
         if effective_filter is not None:
             params["FilterExpression"] = effective_filter
 
-        self._apply_projection(params, select)
+        self._apply_projection(params, select, plan)
 
         if cursor is not None:
             params["ExclusiveStartKey"] = self._decode_cursor(cursor)
@@ -1489,7 +1519,7 @@ class DynamoDb:
 
         response = await self._run_async(_op)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
-        items = response.get("Items", [])
+        items = self._apply_residual(response.get("Items", []), plan)
 
         next_cursor: str | None = None
         if last_key := response.get("LastEvaluatedKey"):
@@ -1565,10 +1595,11 @@ class DynamoDb:
     ) -> dict[str, Any] | list[dict[str, Any]]:
         params: dict[str, Any] = {"ReturnConsumedCapacity": "TOTAL", "Limit": page_size}
 
-        if filter is not None:
-            params["FilterExpression"] = self._build_filter_expression(filter)
+        effective_filter, plan = self._resolve_filter(filter)
+        if effective_filter is not None:
+            params["FilterExpression"] = effective_filter
 
-        self._apply_projection(params, select)
+        self._apply_projection(params, select, plan)
 
         if skip_token is not None:
             params["ExclusiveStartKey"] = skip_token
@@ -1576,9 +1607,10 @@ class DynamoDb:
         response = self.table.scan(**params)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
 
+        scanned = self._apply_residual(response.get("Items", []), plan)
         result: dict[str, Any] = {
-            "items": response.get("Items", []),
-            "count": response.get("Count", 0),
+            "items": scanned,
+            "count": len(scanned) if plan is not None and plan.has_residual else response.get("Count", 0),
         }
         if "LastEvaluatedKey" in response:
             result["next_token"] = response["LastEvaluatedKey"]
@@ -1595,10 +1627,11 @@ class DynamoDb:
     ) -> dict[str, Any] | list[dict[str, Any]]:
         params: dict[str, Any] = {"ReturnConsumedCapacity": "TOTAL", "Limit": page_size}
 
-        if filter is not None:
-            params["FilterExpression"] = self._build_filter_expression(filter)
+        effective_filter, plan = self._resolve_filter(filter)
+        if effective_filter is not None:
+            params["FilterExpression"] = effective_filter
 
-        self._apply_projection(params, select)
+        self._apply_projection(params, select, plan)
 
         if skip_token is not None:
             params["ExclusiveStartKey"] = skip_token
@@ -1610,9 +1643,10 @@ class DynamoDb:
         response = await self._run_async(_op)
         self.add_consumed_capacity(response.get("ConsumedCapacity"))
 
+        scanned = self._apply_residual(response.get("Items", []), plan)
         result: dict[str, Any] = {
-            "items": response.get("Items", []),
-            "count": response.get("Count", 0),
+            "items": scanned,
+            "count": len(scanned) if plan is not None and plan.has_residual else response.get("Count", 0),
         }
         if "LastEvaluatedKey" in response:
             result["next_token"] = response["LastEvaluatedKey"]

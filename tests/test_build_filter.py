@@ -71,9 +71,19 @@ class TestBuildFilter:
         cond = build_filter("age between (18, 65)")
         assert op(cond) == "BETWEEN"
 
-    def test_tolower_field_compare(self):
-        cond = build_filter("tolower(name) eq 'alice'")
-        assert op(cond) == "="
+    def test_tolower_field_compare_raises(self):
+        """DynamoDB cannot fold case, so build_filter refuses rather than
+        silently dropping the fold and returning a case-SENSITIVE match."""
+        with pytest.raises(exceptions.UnsupportedFunctionException):
+            build_filter("tolower(name) eq 'alice'")
+
+    def test_tolower_inside_contains_raises(self):
+        with pytest.raises(exceptions.UnsupportedFunctionException):
+            build_filter("contains(tolower(name),'alice')")
+
+    def test_toupper_raises(self):
+        with pytest.raises(exceptions.UnsupportedFunctionException):
+            build_filter("toupper(name) eq 'ALICE'")
 
     def test_unsupported_function_raises(self):
         with pytest.raises(exceptions.UnsupportedFunctionException):

@@ -319,8 +319,11 @@ class AstToDynamoVisitor(visitor.NodeVisitor):
 
     def func_tolower(self, arg: ast._Node) -> str:
         ":meta private:"
-        arg_sql: str = self.visit(arg)
-        return arg_sql.lower()
+        # This used to lowercase the *rendered* argument, which for a field is the
+        # attribute name — already lowercase — so the fold was silently discarded
+        # and the match stayed case-sensitive. DynamoDB has no case-folding
+        # operator; see dynamo_odata.dynamo_filter.build_filter_plan.
+        raise exceptions.UnsupportedFunctionException("tolower cannot be evaluated by DynamoDB FilterExpression")
 
     def func_toupper(self, arg: ast._Node) -> str:
         ":meta private:"

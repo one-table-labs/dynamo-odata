@@ -4,6 +4,63 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-07-28
+
+### Fixed
+
+- **`tolower()` was a silent no-op, making every case-insensitive filter
+  case-SENSITIVE.** `tolower(x)` lowercased the *rendered argument* — for a field,
+  the attribute name, which is already lowercase — so the fold was discarded and
+  `contains(tolower(display_name),'medical')` compiled to a plain
+  `Attr('display_name').contains('medical')`. The expression parsed, ran, and
+  returned a legitimate-looking empty page for any value capitalized in storage,
+  so a caller read "no such record" off a filter that never ran. Nothing caught it
+  because the emitted expression was exactly what the code intended to emit; the
+  defect was in what that expression *meant* to DynamoDB.
+
+### Added
+
+- **`build_filter_plan(filter_str, policy=None) -> FilterPlan`** — parses a
+  `$filter` and splits its top-level conjunction into the part DynamoDB can
+  evaluate (`FilterPlan.condition`, sent as a `FilterExpression` exactly as
+  before) and a residual evaluated client-side (`FilterPlan.apply(items)`).
+  `AND` distributes, so a conjunct is correct on either side; a conjunct that
+  buries a case-folding call inside an `OR`/`NOT` moves to Python whole.
+  Residual evaluation mirrors DynamoDB's semantics rather than Python's — a
+  comparison against a missing attribute is false (including `ne`), and a type
+  mismatch is false rather than an error — so a filter means the same thing
+  whichever side runs it.
+- `FilterPlan.residual_fields` names the attributes the residual reads. A
+  `FilterExpression` is applied before the projection, but a residual runs
+  against the returned item, so `select` would otherwise starve the predicate
+  and drop every row; `DynamoDb` unions these into any `ProjectionExpression`
+  it builds (skipping a root some other path already projects, since DynamoDB
+  rejects overlapping projection paths).
+
+### Changed
+
+- **Every `DynamoDb` read that accepts `filter=` now goes through
+  `build_filter_plan` and applies the residual to the items it returns** —
+  `get_all`, `get_all_async` (both the single-page and `fetch_all` paths),
+  `query_gsi`, `query_gsi_async`, `scan_all_paginated`, and
+  `scan_all_paginated_async`. `scan_all_paginated`'s `count` reports what the
+  caller received when a residual ran, not what DynamoDB scanned. Cursors are
+  unaffected: `LastEvaluatedKey` describes what was *read*, so it stays correct
+  after a client-side drop and no row is skipped by following it.
+- Cost is unchanged in RCUs — a `FilterExpression` never reduced the items
+  DynamoDB reads — but a residual conjunct returns more bytes over the wire, and
+  as with any filtered query a page may come back shorter than `limit`. Callers
+  that need a full page must page-fill.
+
+### BREAKING
+
+- **`build_filter()` now raises `UnsupportedFunctionException` on `tolower`
+  /`toupper`** instead of silently discarding the fold. A caller that wants
+  case-insensitive matching must use `build_filter_plan`. `AstToDynamoVisitor`
+  (the legacy string-emitting visitor in `odata_query.dynamo.base`) raises for
+  the same reason. Nothing that goes through `DynamoDb` is affected — those
+  paths were switched to `build_filter_plan`.
+
 ## [0.10.0] - 2026-07-26
 
 ### Added

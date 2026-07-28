@@ -521,10 +521,42 @@ build_filter("(a eq 1 and (b eq 2 or c eq 3)) or (d eq 4 and e eq 5)")
 **Rule of thumb:** any time you combine `and` with `or` in the same expression,
 use parentheses to make the grouping explicit.
 
+### Case-insensitive matching — `tolower` / `toupper`
+
+DynamoDB compares stored bytes and has no case-folding operator, so
+`contains(tolower(name),'fabry')` cannot be a `FilterExpression` at any price.
+`build_filter` therefore **raises** on `tolower`/`toupper` rather than dropping
+the fold and handing back a case-sensitive match that reads as case-insensitive.
+
+Use `build_filter_plan` instead. It splits the filter's top-level conjunction
+into the half DynamoDB evaluates and a residual evaluated in Python:
+
+```python
+from dynamo_odata import build_filter_plan
+
+plan = build_filter_plan("status eq 'active' and contains(tolower(name),'fabry')")
+plan.condition        # Attr('status').eq('active')  → sent as FilterExpression
+plan.residual_fields  # frozenset({'name'})          → must be projected
+plan.apply(items)     # drops rows the fold rejects
+```
+
+Every `DynamoDb` read that takes `filter=` does this for you — pass the filter
+and the returned items are already correct. Two things to know:
+
+- **Fold the literal too.** `tolower(name)` folds the stored value, not the
+  needle, so the comparison value must already be lowercase:
+  `contains(tolower(name),'fabry')`, never `…,'Fabry')`.
+- **A residual costs bytes, not RCUs.** A `FilterExpression` never reduced the
+  items DynamoDB *reads*, so capacity is unchanged — but rows the residual
+  rejects still cross the wire, and (as with any filtered query) a page can come
+  back shorter than `limit`. Page-fill if you need a full page.
+
 ### Unsupported (by design)
 
 These are not supported in DynamoDB OData queries:
-- `endswith`, `concat`, `indexof`, `length`, `substring`, `toupper`, `trim`
+- `endswith`, `concat`, `indexof`, `length`, `substring`, `trim`
+- `tolower` / `toupper` in `build_filter` — see the section above for
+  `build_filter_plan`, which does support them
 - datetime helpers: `year`, `month`, `day`, `hour`, `minute`, `date`, `now`
 - math helpers: `round`, `floor`, `ceiling`
 

@@ -261,13 +261,16 @@ class TestStringFunctions:
         _, cond = build("contains(name, 'Smith') or contains(name, 'Jones')")
         assert op(cond) == "OR"
 
-    def test_tolower_on_field_name(self):
+    def test_tolower_raises(self):
         """
-        tolower() applied to a field identifier just lowercases the identifier
-        string — happens to produce a valid Attr() call for lowercase field names.
+        tolower() used to lowercase the rendered *identifier* — the attribute
+        name, already lowercase — silently discarding the fold and leaving a
+        case-sensitive match. DynamoDB has no case-folding operator, so the
+        visitor now refuses instead of emitting a filter that means something
+        other than what it reads as.
         """
-        _, cond = build("tolower(name) eq 'alice'")
-        assert op(cond) == "="
+        with pytest.raises(exceptions.UnsupportedFunctionException):
+            build("tolower(name) eq 'alice'")
 
 
 # ─── 5. Attribute existence ───────────────────────────────────────────────────
