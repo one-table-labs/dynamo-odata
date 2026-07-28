@@ -1,7 +1,13 @@
 """dynamo-odata package."""
 
 from .db import DynamoDb
-from .dynamo_filter import AstToDynamoConditionVisitor, build_filter, validate_filter
+from .dynamo_filter import (
+    AstToDynamoConditionVisitor,
+    FilterPlan,
+    build_filter,
+    build_filter_plan,
+    validate_filter,
+)
 from .expand import ExpandConfig, apply_dotted_select, expand_items_async, parse_expand
 from .guardrails import (
     FilterPolicy,
@@ -36,6 +42,7 @@ __all__ = [
     "AuditHook",
     "DynamoDb",
     "ExpandConfig",
+    "FilterPlan",
     "FilterPolicy",
     "FilterPolicyViolationError",
     "KeySchema",
@@ -47,6 +54,7 @@ __all__ = [
     "apply_response_allowlist",
     "apply_response_field_policy",
     "build_filter",
+    "build_filter_plan",
     "build_projection",
     "build_regulated_profile",
     "expand_items_async",
