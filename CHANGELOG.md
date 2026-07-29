@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **`build_projection()` now raises `TypeError` when handed a `str`.** A `str`
+  satisfies `Iterable[str]` by yielding characters, so `build_projection("a,b")`
+  previously aliased every character and returned a well-formed but meaningless
+  `ProjectionExpression` (`#a,#,,#b`) — the mistake surfaced only once DynamoDB
+  rejected the expression, far from the call site. The trap is easy to fall into
+  because `apply_dotted_select()` takes a comma-separated string for the same
+  concept, so passing a raw `$select` value into `build_projection()` looks
+  right. Callers already passing a list or other iterable are unaffected.
+
 ## [0.11.0] - 2026-07-28
 
 ### Fixed
