@@ -13,7 +13,7 @@ Thanks for your interest in contributing! This document outlines the process and
 
 ```bash
 # Clone the repository
-git clone https://github.com/smitrob/dynamo-odata.git
+git clone https://github.com/one-table-labs/dynamo-odata.git
 cd dynamo-odata
 
 # Create a virtual environment
@@ -76,7 +76,7 @@ pre-commit run --all-files
 
 ### Before You Start
 
-1. Check existing [issues](https://github.com/smitrob/dynamo-odata/issues) to avoid duplicate work
+1. Check existing [issues](https://github.com/one-table-labs/dynamo-odata/issues) to avoid duplicate work
 2. For larger features, consider opening an issue first to discuss the approach
 3. Create a feature branch: `git checkout -b feature/your-feature-name`
 
@@ -306,7 +306,7 @@ matches `pyproject.toml` before pushing.
 
 ## Questions?
 
-- Check existing [issues](https://github.com/smitrob/dynamo-odata/issues) and [discussions](https://github.com/smitrob/dynamo-odata/discussions)
+- Check existing [issues](https://github.com/one-table-labs/dynamo-odata/issues) and [discussions](https://github.com/one-table-labs/dynamo-odata/discussions)
 - Open a new discussion for questions
 - Open an issue for bugs or feature requests
 
