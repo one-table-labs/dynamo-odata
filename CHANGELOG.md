@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-29
+
+First stable release. The public API — `build_filter`, `build_filter_plan`,
+`build_projection`, `apply_dotted_select`, and the `DynamoDb` read/write
+methods — is now covered by [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
+breaking changes to it require a major version. There are no functional changes
+in this release beyond the `build_projection()` guard below; 1.0.0 is a
+stability commitment, not a rewrite, and 0.11.0 users can upgrade by passing a
+list rather than a string to `build_projection()`.
+
 ### Changed
 
 - **`build_projection()` now raises `TypeError` when handed a `str`.** A `str`
