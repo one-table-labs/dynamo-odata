@@ -272,11 +272,37 @@ Example:
 
 (For maintainers)
 
-1. Update CHANGELOG.md with version and date
-2. Update `pyproject.toml` version
-3. Create a git tag: `git tag v0.2.0`
-4. Push tag: `git push origin v0.2.0`
-5. GitHub Actions publishes to PyPI automatically
+Releases are fully automated: pushing a `v*` tag triggers
+[`.github/workflows/publish.yml`](.github/workflows/publish.yml), which builds the
+sdist and wheel, runs `twine check`, and publishes to PyPI via
+[`pypa/gh-action-pypi-publish`](https://github.com/pypa/gh-action-pypi-publish). It
+authenticates with PyPI through OIDC trusted publishing (the `pypi` GitHub
+environment plus `id-token: write`) — there are no API tokens to manage, and you
+should never run `twine upload` by hand.
+
+To cut a release:
+
+1. **Bump the version** in `pyproject.toml` (`version = "X.Y.Z"`).
+2. **Add the CHANGELOG.md section** for `X.Y.Z` with the release date, moving
+   anything under "Unreleased" into it.
+3. **Open a PR and merge to `main`.** The default branch has a ruleset requiring
+   review, so the bump lands through a PR like any other change. Tag only after
+   the merge — the tag must point at the commit you intend to ship.
+4. **Tag and push** from the merged `main`:
+   ```bash
+   git checkout main && git pull
+   git tag -a vX.Y.Z -m "vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+5. **Watch the run** — `gh run watch` or the Actions tab. The `publish` job waits
+   on the `pypi` environment, so it may pause if that environment has a
+   protection rule configured.
+6. **Verify the install** once PyPI has the new version, per
+   [HUMAN_TODO.md](HUMAN_TODO.md).
+
+Tags are the release trigger, so a mistyped tag publishes a real version — PyPI
+does not allow reusing a version number even after a delete. Double-check the tag
+matches `pyproject.toml` before pushing.
 
 ## Questions?
 
